@@ -160,8 +160,8 @@ publication.
 U-FAST is released under the **MIT License** (see [LICENSE.txt](LICENSE.txt)).
 The production layer derives from
 [PySCFabSim](https://github.com/prosysscience/PySCFabSim-release), which is
-likewise MIT-licensed; its copyright notice is retained in the third-party
-notices section of LICENSE.txt.
+likewise MIT-licensed; its copyright notice, together with the LogiFabSim and
+SMT2020 attributions, is kept in [NOTICE.txt](NOTICE.txt).
 
 ## Contact
 
