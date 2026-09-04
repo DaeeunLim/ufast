@@ -1,17 +1,20 @@
 """
-kinematics.py — OHT 가감속 운동학 이동시간 모델.
+kinematics.py — OHT acceleration/deceleration kinematics travel-time model.
 
-LogiFabSim(Rank & Betker, 2025 IFAC)의 엣지 이송시간 모델을 따라 재구현한다
-(reimplemented following Rank & Betker, 2025). 각 엣지를 가속→순항→감속의
-트래피저이드 속도 프로파일로 모델링하고, 엣지 경계에서 속도가 다음 엣지
-속도제한으로 이어진다(LogiFabSim 단순화). 경로 출발/도착은 정지(속도 0).
-결과값은 LogiFabSim 의 calculate_edge_travel_time 과 일치하도록 맞췄다.
+Reimplements the edge transport-time model of LogiFabSim (Rank & Betker, 2025 IFAC)
+(reimplemented following Rank & Betker, 2025). Each edge is modelled as a
+trapezoidal speed profile of accelerate → cruise → decelerate, and at an edge
+boundary the speed carries over into the next edge's speed limit (LogiFabSim
+simplification). A path starts and ends at rest (speed 0).
+The results are matched to LogiFabSim's calculate_edge_travel_time.
 
-목적: U-FAST 의 free-flow 이송시간 baseline 을 LogiFabSim 의 t_ij 와 동일하게
-맞춰, 두 시뮬레이터의 차이를 '혼잡 모델' 하나로 고정하기 위함.
+Purpose: make U-FAST's free-flow transport-time baseline identical to LogiFabSim's
+t_ij, so that the only difference between the two simulators is the congestion
+model.
 
-LogiFabSim 원본 대비 유일한 deviation: 삼각형 프로파일의 sqrt 인자가 음수가
-될 때 0 으로 clamp(런타임 crash 방지). 정상 데이터에서는 발생하지 않는다.
+The only deviation from the LogiFabSim original: the sqrt argument of the
+triangular profile is clamped to 0 when it would be negative (prevents a runtime
+crash). This does not occur with well-formed data.
 """
 from __future__ import annotations
 import math
@@ -19,7 +22,7 @@ from typing import List, Tuple
 
 
 class VehicleKinematics:
-    """차량 제원(최고속도/가속도/감속도) 기반 운동학 이동시간 계산기."""
+    """Kinematic travel-time calculator based on vehicle specs (max speed / acceleration / deceleration)."""
 
     def __init__(self, max_speed: float, acceleration: float, deceleration: float):
         self.max_speed = max_speed
@@ -29,24 +32,24 @@ class VehicleKinematics:
     def edge_time(self, distance: float, speed_limit: float,
                   initial_speed: float, speed_limit_next_edge: float) -> float:
         """
-        엣지 1개 통과 시간 — LogiFabSim calculate_edge_travel_time 과 동일 semantics.
+        Traversal time of a single edge — same semantics as LogiFabSim calculate_edge_travel_time.
         """
         a = self.acceleration
         d = self.deceleration
         achievable_speed = min(self.max_speed, speed_limit)
 
-        # 도달 가능 속도까지 가속
+        # accelerate to the achievable speed
         acceleration_time = (achievable_speed - initial_speed) / a
         acceleration_distance = (initial_speed * acceleration_time
                                  + 0.5 * a * acceleration_time ** 2)
-        # 다음 엣지 속도제한까지 감속
+        # decelerate to the next edge's speed limit
         deceleration_time = (achievable_speed - speed_limit_next_edge) / d
         deceleration_distance = (achievable_speed * deceleration_time
                                  - 0.5 * d * deceleration_time ** 2)
 
         distance_cruise = distance - acceleration_distance - deceleration_distance
         if distance_cruise < 0:
-            # 엣지가 짧아 순항 불가 — 삼각형 프로파일
+            # edge too short to cruise — triangular profile
             time_cruise = 0.0
             v_peak = self._v_max_triangular(a, d, distance,
                                             initial_speed, speed_limit_next_edge)
@@ -66,9 +69,10 @@ class VehicleKinematics:
 
     def path_time(self, edges: List[Tuple[float, float]]) -> float:
         """
-        경로 전체 이송시간. edges: [(거리, 속도제한), ...] 순서대로.
-        엣지 경계 진입속도 = 직전 엣지의 다음-속도제한(=해당 엣지 속도제한),
-        출발/도착은 정지 — LogiFabSim calc_point_to_point_travel_time 과 동일 semantics.
+        Transport time over a whole path. edges: [(distance, speed_limit), ...] in order.
+        Entry speed at an edge boundary = previous edge's next-speed-limit (= this edge's
+        speed limit); start/end at rest — same semantics as LogiFabSim
+        calc_point_to_point_travel_time.
         """
         if not edges:
             return 0.0

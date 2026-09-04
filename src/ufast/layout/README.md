@@ -1,22 +1,22 @@
-# src/ufast/layout — 레이아웃 변환
+# src/ufast/layout — layout conversion
 
-## 역할
+## Role
 
-CAD/도면 세계와 시뮬레이션 세계를 잇는 **레이아웃 변환 계층**. `rail_manager.py`는 로딩된 `CLayer` 도형들 중 rail 레이어의 직선들을 그래프로 해석해 `Section` 객체망(연결 관계·길이·버퍼)으로 변환하고, 도면 텍스트를 최근접 레일 노드에 매핑해 `EQ`를 생성한다.
+The **layout conversion layer** bridging the CAD/drawing world and the simulation world. `rail_manager.py` interprets the lines of the rail layers among the loaded `CLayer` figures as a graph, converts them into a network of `Section` objects (connectivity, length, buffers), and maps the drawing text to the nearest rail node to create `EQ`s.
 
 
-## 파일별 역할
+## Files
 
-| 파일 | 핵심 클래스/함수 | 역할 |
+| File | Key classes/functions | Role |
 |---|---|---|
-| `rail_manager.py` | `RailManager.build_layout(layers)` | 핵심 변환 파이프라인 — ① rail 레이어의 `CLine` 수집(없으면 기존 layout 유지) ② 좌표 반올림으로 node_map 구축 ③ degree≠2 분기/말단 노드에서 출발해 연속 선분을 하나의 `Section`으로 병합 ④ 끝점 거리 <1.0이면 `next_sections`/`prev_sections` 연결 ⑤ EQ 바인딩 |
-| | `_bind_eq_from_text()` | 모든 레이어의 `CText`를 최근접 레일 노드에 매핑(`MAX_EQ_DISTANCE=5000.0`) → `EQ` 생성 및 Section에 등록 |
+| `rail_manager.py` | `RailManager.build_layout(layers)` | Core conversion pipeline — (1) collect the `CLine`s of the rail layers (keep the existing layout if there are none) (2) build node_map by rounding coordinates (3) starting from degree≠2 junction/terminal nodes, merge consecutive segments into a single `Section` (4) link `next_sections`/`prev_sections` when the end-point distance is <1.0 (5) EQ binding |
+| | `_bind_eq_from_text()` | Map the `CText` of every layer to the nearest rail node (`MAX_EQ_DISTANCE=5000.0`) → create `EQ` and register it with the Section |
 
-## 데이터 흐름
+## Data flow
 
-- `main_ui`의 `load_rail_file()`/`load_layout_file()`(DXF) → `rail_manager.build_layout(layers)` → `SimulatorDataSet.sections`/`eq_list` 채움 → `viewer.draw_layout()`. 레이어 패널의 "Convert to Rail"도 같은 경로.
-- `RailManager`는 반환값 없이 싱글턴에 직접 write한다.
+- `main_ui`'s `load_rail_file()`/`load_layout_file()` (DXF) → `rail_manager.build_layout(layers)` → fills `SimulatorDataSet.sections`/`eq_list` → `viewer.draw_layout()`. "Convert to Rail" in the layer panel follows the same path.
+- `RailManager` writes directly into the singleton without returning a value.
 
-## 외부 의존
+## Dependencies
 
-내부: `ufast.drawing.geometry`, `ufast.core.components`, `ufast.core.data_set`. 서드파티 없음.
+Internal: `ufast.drawing.geometry`, `ufast.core.components`, `ufast.core.data_set`. No third-party dependencies.

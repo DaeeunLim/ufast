@@ -1,25 +1,26 @@
 """
-aggregate.py — seed 반복실험 결과의 KPI 집계.
+aggregate.py — KPI aggregation over seed-replication results.
 
-같은 구성(config)으로 seed 만 바꿔 여러 번 실행한 결과 JSON 들을 모아,
-구성별로 KPI 의 mean / std / min / max 를 계산한다.
+Collects the result JSONs of runs that share the same configuration (config) and
+differ only in seed, and computes mean / std / min / max of each KPI per
+configuration.
 
-사용:
-  python3 ufast/cosim/aggregate.py                       # results/ 전체 자동 수집
-  python3 ufast/cosim/aggregate.py results/HVLM*         # 경로/글롭 지정
-  python3 ufast/cosim/aggregate.py --out results/agg     # 저장 폴더 지정
+Usage:
+  python3 ufast/cosim/aggregate.py                       # collect all of results/ automatically
+  python3 ufast/cosim/aggregate.py results/HVLM*         # explicit paths/globs
+  python3 ufast/cosim/aggregate.py --out results/agg     # output folder
   python3 ufast/cosim/aggregate.py --metrics amhs.avg_transport_s production.by_category.Regular.avg_cycle_days
 
-동작:
-  - 각 결과 JSON 의 meta 에서 seed·실행시각 등 휘발 필드를 제외한 나머지를
-    "구성 키"로 삼아 그룹핑한다 (dataset/days/oht/dispatcher/전략... 이 같으면
-    같은 실험).
-  - production / amhs / equipment / transport 트리의 숫자 leaf 를 점(.) 경로로
-    평탄화해 KPI 로 삼는다.
-  - 그룹별로 aggregate.csv (metric, n, mean, std, min, max) 와
-    aggregate.json 을 저장하고, 핵심 KPI 요약을 콘솔에 출력한다.
+Behaviour:
+  - Groups runs by a "configuration key": the meta of each result JSON minus
+    volatile fields such as seed and wall time (same dataset/days/oht/dispatcher/
+    strategies... = same experiment).
+  - Flattens the numeric leaves of the production / amhs / equipment / transport
+    trees into dotted paths and treats them as KPIs.
+  - Saves aggregate.csv (metric, n, mean, std, min, max) and aggregate.json per
+    group, and prints a summary of the key KPIs to the console.
 
-stdlib 만 사용한다 (pandas 불필요) — SoftwareX 공개 시 의존성 최소화.
+Uses only the stdlib (no pandas) — minimal dependencies for the SoftwareX release.
 """
 from __future__ import annotations
 
@@ -38,12 +39,12 @@ if _BASE not in sys.path:
 
 from ufast.paths import RESULTS_DIR
 
-# 구성 키에서 제외할 meta 필드 — seed 와 실행마다 달라지는 결과성 값들
+# meta fields excluded from the configuration key — seed and per-run result values
 _VOLATILE_META = {
     "seed", "run_id", "wall_time_s", "sim_time_days", "dispatch_steps",
 }
 
-# 콘솔 요약에 표시할 핵심 KPI (존재하는 것만 출력)
+# key KPIs shown in the console summary (only those present are printed)
 _SUMMARY_METRICS = [
     "production.total.throughput",
     "production.by_category.Regular.avg_cycle_days",
@@ -61,7 +62,7 @@ _SUMMARY_METRICS = [
 
 
 def _flatten(prefix: str, node: Any, out: Dict[str, float]):
-    """중첩 dict 의 숫자 leaf 를 'a.b.c' 경로로 평탄화."""
+    """Flatten the numeric leaves of a nested dict into 'a.b.c' paths."""
     if isinstance(node, bool):
         return
     if isinstance(node, (int, float)):
@@ -85,7 +86,7 @@ def _collect_json_paths(inputs: List[str]) -> List[str]:
                                    recursive=True))
         else:
             paths.extend(glob.glob(item))
-    # 집계 산출물·궤적 파일은 제외
+    # exclude aggregation outputs and trajectory files
     return sorted({
         p for p in paths
         if p.endswith(".json")
@@ -101,7 +102,7 @@ def load_runs(inputs: List[str]) -> List[Dict[str, Any]]:
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:  # noqa: BLE001
-            print(f"[aggregate] skip (읽기 실패): {p} — {e}")
+            print(f"[aggregate] skip (read failed): {p} — {e}")
             continue
         if not isinstance(data, dict) or "meta" not in data:
             continue
@@ -111,14 +112,14 @@ def load_runs(inputs: List[str]) -> List[Dict[str, Any]]:
 
 
 def aggregate_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """구성별 그룹 → KPI 통계. 반환: [{config, seeds, n, metrics:{path:{...}}}]"""
+    """Group by configuration → KPI statistics. Returns: [{config, seeds, n, metrics:{path:{...}}}]"""
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for r in runs:
         groups.setdefault(_config_key(r["meta"]), []).append(r)
 
     out = []
     for cfg_json, members in sorted(groups.items()):
-        # run 별 KPI 평탄화 (meta 의 결과성 값도 metric 으로 포함)
+        # flatten KPIs per run (result-type meta values are included as metrics too)
         per_run: List[Dict[str, float]] = []
         for r in members:
             flat: Dict[str, float] = {}
@@ -146,8 +147,8 @@ def aggregate_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         seeds = sorted(r["meta"].get("seed", -1) for r in members)
         if len(set(seeds)) != len(seeds):
-            print(f"[aggregate] ⚠️ 같은 구성에 중복 seed 존재: {seeds} "
-                  "(같은 실험을 두 번 저장했을 수 있음)")
+            print(f"[aggregate] ⚠️ duplicate seeds in the same configuration: {seeds} "
+                  "(the same experiment may have been saved twice)")
         out.append({
             "config": json.loads(cfg_json),
             "seeds": seeds,
@@ -208,30 +209,30 @@ def print_summary(groups: List[Dict[str, Any]], metrics_filter: List[str]):
                   f"[{s['min']:.3f}, {s['max']:.3f}]")
             shown += 1
         if shown == 0:
-            print("  (요약 대상 KPI 없음 — --metrics 로 경로를 지정하세요)")
+            print("  (no KPI to summarise — specify paths with --metrics)")
 
 
 def main():
     p = argparse.ArgumentParser(
-        description="seed 반복실험 결과 JSON 을 구성별로 묶어 KPI mean/std 집계")
+        description="Group seed-replication result JSONs by configuration and aggregate KPI mean/std")
     p.add_argument("inputs", nargs="*",
                    default=[RESULTS_DIR],
-                   help="결과 JSON 파일/폴더/글롭 (기본: results/)")
+                   help="result JSON files/folders/globs (default: results/)")
     p.add_argument("--out", default=None,
-                   help="집계 저장 폴더 (기본: <첫 입력 폴더>/aggregate)")
+                   help="output folder for aggregates (default: <first input folder>/aggregate)")
     p.add_argument("--metrics", nargs="*", default=None,
-                   help="콘솔 요약에 표시할 KPI 점 경로 목록")
+                   help="dotted KPI paths to show in the console summary")
     a = p.parse_args()
 
     runs = load_runs(a.inputs)
     if not runs:
-        print("[aggregate] 결과 JSON 을 찾지 못했습니다. "
-              "ufast/cosim/run.py 를 먼저 실행하세요.")
+        print("[aggregate] no result JSON found. "
+              "Run ufast/cosim/run.py first.")
         sys.exit(1)
-    print(f"[aggregate] 결과 {len(runs)}개 로드")
+    print(f"[aggregate] loaded {len(runs)} results")
 
     groups = aggregate_runs(runs)
-    print(f"[aggregate] 구성 그룹 {len(groups)}개")
+    print(f"[aggregate] {len(groups)} configuration groups")
 
     out_dir = a.out or os.path.join(
         a.inputs[0] if os.path.isdir(a.inputs[0]) else os.path.dirname(a.inputs[0]),
@@ -240,7 +241,7 @@ def main():
     print_summary(groups, a.metrics)
     print()
     for s in saved:
-        print(f"[aggregate] 저장: {s}")
+        print(f"[aggregate] saved: {s}")
 
 
 if __name__ == "__main__":

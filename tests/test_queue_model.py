@@ -1,7 +1,8 @@
-"""'queue' 혼잡 모델 (capacity blocking) 단위 테스트.
+"""Unit tests for the 'queue' congestion model (capacity blocking).
 
-전체 스택(RouteManager + rail 로드) 없이 AMHSExecutor 의 queue 모델
-핵심 로직만 검증한다 — 대기열 FIFO wake, wait-for 사이클 탐지, 강제 진입.
+Verifies only the core logic of the AMHSExecutor queue model without the full
+stack (RouteManager + rail loading) — FIFO wake-up of waiters, wait-for cycle
+detection, forced entry.
 """
 import sys
 from collections import defaultdict, deque
@@ -13,7 +14,7 @@ from ufast.cosim.amhs import AMHSExecutor  # noqa: E402
 
 
 def _bare_executor(**attrs):
-    """__init__ 을 거치지 않은 최소 상태의 AMHSExecutor."""
+    """A minimal-state AMHSExecutor created without going through __init__."""
     ex = object.__new__(AMHSExecutor)
     ex.congestion_model = 'queue'
     ex.section_inflight = {}
@@ -41,15 +42,15 @@ class _FakeOHT:
 
 class TestDeadlockDetection:
     def test_two_cycle_detected_earliest_waiter_is_victim(self):
-        # A 는 sec2 대기 (sec2 는 B 가 점유), B 는 sec1 대기 (sec1 은 A 가 점유)
+        # A waits for sec2 (occupied by B), B waits for sec1 (occupied by A)
         ex = _bare_executor(
             _blocked_since={'A': (2, 10.0), 'B': (1, 5.0)},
             _section_vehicles=defaultdict(set, {1: {'A'}, 2: {'B'}}),
         )
-        assert ex._find_deadlock_victim() == 'B'  # 더 오래 기다린 쪽
+        assert ex._find_deadlock_victim() == 'B'  # the one that has waited longer
 
     def test_mover_in_target_means_no_deadlock(self):
-        # sec2 에 이동 중(비차단) 차량 M 이 있으면 자연 해소 가능 — 데드락 아님
+        # A moving (non-blocked) vehicle M in sec2 means it can resolve naturally — not a deadlock
         ex = _bare_executor(
             _blocked_since={'A': (2, 10.0), 'B': (1, 5.0)},
             _section_vehicles=defaultdict(set, {1: {'A'}, 2: {'B', 'M'}}),
@@ -65,7 +66,7 @@ class TestDeadlockDetection:
         assert ex._find_deadlock_victim() == 'C'
 
     def test_chain_without_cycle_is_not_deadlock(self):
-        # A → B (B 는 사이클 없이 mover 를 기다림) — 사이클 없음
+        # A → B (B waits for a mover, no cycle) — no cycle
         ex = _bare_executor(
             _blocked_since={'A': (2, 10.0), 'B': (3, 5.0)},
             _section_vehicles=defaultdict(
@@ -93,17 +94,17 @@ class TestWakeWaiters:
 
         ex._wake_waiters(7, now=100.0)
 
-        assert admitted == ['A', 'B']          # FIFO, 용량 2 까지만
+        assert admitted == ['A', 'B']          # FIFO, only up to capacity 2
         assert [w[0].name for w in ex._waiting[7]] == ['C']
         assert 'C' in ex._blocked_since
-        assert ex.total_blocked_time == 200.0  # A, B 각각 100s 대기
+        assert ex.total_blocked_time == 200.0  # A and B each waited 100s
 
 
 class TestForceAdmit:
     def test_force_admit_bypasses_capacity(self):
         ex = _bare_executor(
             section_capacity={7: 1},
-            section_inflight={7: 1},   # 가득 참
+            section_inflight={7: 1},   # full
         )
         calls = []
 

@@ -1,23 +1,23 @@
 """
-rail_format.py — .rail 파일 공통 파서
+rail_format.py — common .rail file parser
 
-.rail 파일을 파싱하는 유일한 곳. 파일을 중립적인 레코드 구조(RailData)로 읽고,
-용도별 변환은 각 소비자가 담당한다:
-  - common/rail_io.py     : RailData → CLayer(시각화) + SimulatorDataSet(Section/EQ)
-  - route/rail_parser.py    : RailData → route.graph.Network(노드/링크 그래프)
+The single place where .rail files are parsed. Reads the file into a neutral record
+structure (RailData); each consumer handles its own purpose-specific conversion:
+  - common/rail_io.py     : RailData → CLayer (visualization) + SimulatorDataSet (Section/EQ)
+  - route/rail_parser.py    : RailData → route.graph.Network (node/link graph)
 
-프로젝트 내부 의존 없음(순수 stdlib) — 어느 패키지에서든 import 가능.
+No intra-project dependencies (pure stdlib) — importable from any package.
 
-.rail 파일 포맷 (탭 구분, 첫 줄 "RAILDATA"):
-  NODE\tid\tx\ty                                       노드 좌표
-  LINK\tsec\ttype\tfrom\tto[\tpenalty1\tpenalty2]      섹션 연결
-  RAILLIST\tsec\ttype\tfrom\tto\tsx\tsy\tex\tey\tangle\tlength   섹션 정의
-  EQTONODEMAP\teq\tnode                                 EQ→노드
-  NODETOEQMAP\tid1\tid2 / NODETOEQLIST\tnode\teq        노드→EQ
-  TEXT\teq\ttype\tx\ty                                  EQ 라벨(시각화)
-  LINE\tsec\ttype\tx1\ty1\tx2\ty2\tr\tg\tb              도형(시각화)
+.rail file format (tab-separated, first line "RAILDATA"):
+  NODE\tid\tx\ty                                       node coordinates
+  LINK\tsec\ttype\tfrom\tto[\tpenalty1\tpenalty2]      section link
+  RAILLIST\tsec\ttype\tfrom\tto\tsx\tsy\tex\tey\tangle\tlength   section definition
+  EQTONODEMAP\teq\tnode                                 EQ→node
+  NODETOEQMAP\tid1\tid2 / NODETOEQLIST\tnode\teq        node→EQ
+  TEXT\teq\ttype\tx\ty                                  EQ label (visualization)
+  LINE\tsec\ttype\tx1\ty1\tx2\ty2\tr\tg\tb              shape (visualization)
   CURVE\tsec\ttype\tx1\ty1\tcx\tcy\tx2\ty2\tcenterX\tcenterY\tangle\tr\tg\tb
-  SCALE\tmin_x\tmax_x\tmin_y\tmax_y                     뷰포트 범위
+  SCALE\tmin_x\tmax_x\tmin_y\tmax_y                     viewport extent
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ from typing import Dict, List, Optional
 
 @dataclass
 class NodeRec:
-    name: str          # 노드 ID (파일상 문자열 — 정수 변환은 소비자 몫)
+    name: str          # node ID (string in the file — integer conversion is up to the consumer)
     x: float
     y: float
 
 
 @dataclass
 class LinkRec:
-    name: str          # 섹션 ID
+    name: str          # section ID
     link_type: str     # LINE or CURVE
     first_node: str
     second_node: str
@@ -45,7 +45,7 @@ class LinkRec:
 
 @dataclass
 class RailListRec:
-    name: str          # 섹션 ID
+    name: str          # section ID
     rail_type: str     # LINE or CURVE
     first_node: str
     second_node: str
@@ -60,7 +60,7 @@ class RailListRec:
 
 @dataclass
 class TextRec:
-    name: str          # EQ 이름
+    name: str          # EQ name
     type_str: str
     x: float
     y: float
@@ -115,10 +115,10 @@ class RailData:
 
 def parse_rail_file(filepath: str, require_header: bool = True) -> RailData:
     """
-    .rail 파일을 RailData로 파싱한다.
+    Parse a .rail file into RailData.
 
-    - 인코딩 오류는 무시(errors='ignore'), 형식이 깨진 라인은 경고 후 건너뜀.
-    - require_header=True면 첫 줄에 "RAILDATA"가 없을 때 ValueError.
+    - Encoding errors are ignored (errors='ignore'); malformed lines are skipped with a warning.
+    - With require_header=True, a ValueError is raised if the first line lacks "RAILDATA".
     """
     path = Path(filepath)
     if not path.exists():
@@ -166,7 +166,7 @@ def parse_rail_file(filepath: str, require_header: bool = True) -> RailData:
                     r.angle = float(p[9])
                     r.has_geometry = True
                 if len(p) > 10:
-                    r.length = float(p[-1])  # 마지막 컬럼이 길이
+                    r.length = float(p[-1])  # the last column is the length
                 data.rail_list.append(r)
 
             elif rec == "EQTONODEMAP" and len(p) >= 3:

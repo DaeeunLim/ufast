@@ -6,7 +6,7 @@ from ufast.core.data_set import SimulatorDataSet
 
 class RailManager:
     """
-    CAD/Drawing 데이터(CLayer)를 시뮬레이션 데이터(Section, Node)로 변환하는 클래스
+    Converts CAD/drawing data (CLayer) into simulation data (Section, Node)
     """
     def __init__(self):
         self.data_set = SimulatorDataSet.get_instance()
@@ -21,11 +21,11 @@ class RailManager:
                 if isinstance(shape, CLine):
                     all_lines.append(shape)
 
-        # ✅ rail line이 없으면 기존 layout 유지 (깜빡임/초기화 방지)
+        # ✅ If there are no rail lines, keep the existing layout (avoids flicker/reset)
         if not all_lines:
             return
 
-        # 2) 이제부터 clear
+        # 2) Clear from here on
         self.data_set.sections.clear()
         self.data_set.section_id_to_index.clear()
 
@@ -43,9 +43,9 @@ class RailManager:
             node_map[p2].append(line)
 
         # 3. Generate Sections (Merge connected lines)
-        processed_lines = set()  # id 기반으로 추적
+        processed_lines = set()  # tracked by id
         sec_id_counter = 1
-        node_to_section_map: Dict[Tuple[float, float], Section] = {}  # 전체 노드→Section 매핑
+        node_to_section_map: Dict[Tuple[float, float], Section] = {}  # mapping of every node → Section
         
         # Helper to find other end of line
         def get_other_end(line, current_point):
@@ -100,14 +100,14 @@ class RailManager:
                     section = Section(sec_id)
                     section.figures = current_section_lines
 
-                    # Section에 속하는 모든 노드 좌표를 기록 (EQ 매핑용, merge 전)
+                    # Record every node coordinate belonging to the Section (for EQ mapping, before merge)
                     for l in current_section_lines:
                         p = (round(l.start_x, 1), round(l.start_y, 1))
                         node_to_section_map[p] = section
                         p = (round(l.end_x, 1), round(l.end_y, 1))
                         node_to_section_map[p] = section
 
-                    # 길이 계산
+                    # Length computation
                     total_len = 0
                     for l in current_section_lines:
                         dx = l.end_x - l.start_x
@@ -115,10 +115,10 @@ class RailManager:
                         total_len += math.sqrt(dx*dx + dy*dy)
                     section.length = total_len
 
-                    # 버퍼 추가
+                    # Add buffer
                     section.add_buffer(total_len, f"N_{sec_id}_S", f"N_{sec_id}_E")
 
-                    # 다중 CLine → 단일 CLine 병합 (시각화·보간 단순화)
+                    # Merge multiple CLines → a single CLine (simplifies visualization/interpolation)
                     if merge_lines:
                         section.merge_figures()
 
@@ -126,15 +126,15 @@ class RailManager:
                     self.data_set.section_id_to_index[sec_id] = len(self.data_set.sections) - 1
 
         # 4. Link Sections (Naive Geometry Matching)
-        # 끝점과 시작점이 일치하면 연결 (Tolerance 1.0mm)
+        # Connect when an end point coincides with a start point (tolerance 1.0mm)
         for sec in self.data_set.sections:
             if not sec.figures: continue
             
-            # 섹션의 시작점과 끝점 찾기 (첫 번째 라인의 시작점, 마지막 라인의 끝점)
+            # Find the section's start and end points (start of the first line, end of the last line)
             first_line = sec.figures[0]
             last_line = sec.figures[-1]
             
-            # 섹션의 끝점 좌표
+            # End-point coordinates of the section
             end_x, end_y = last_line.end_x, last_line.end_y
             
             for other in self.data_set.sections:
@@ -143,14 +143,14 @@ class RailManager:
                 
                 other_start_line = other.figures[0]
                 
-                # 거리 계산
+                # Distance computation
                 dist = math.hypot(other_start_line.start_x - end_x, other_start_line.start_y - end_y)
                 
-                if dist < 1.0: # 연결됨
+                if dist < 1.0: # connected
                     sec.next_sections.append(other.section_id)
                     other.prev_sections.append(sec.section_id)
 
-        # 5. TEXT → 가장 가까운 Rail 노드 매핑 → EQ 생성 및 Section 연결
+        # 5. TEXT → map to the nearest rail node → create EQ and attach to its Section
         self.data_set.eq_list.clear()
         if self.data_set.sections:
             self._bind_eq_from_text(layers, node_map, node_to_section_map)
@@ -159,22 +159,22 @@ class RailManager:
                            node_map: Dict[Tuple[float, float], list],
                            node_to_section: Dict[Tuple[float, float], 'Section']):
         """
-        모든 레이어의 CText를 찾아 가장 가까운 Rail 노드에 매핑하고,
-        EQ 객체를 생성하여 해당 Section에 연결한다.
-        node_to_section: merge 전 원본 라인의 모든 노드 → Section 매핑
+        Find the CText in every layer, map each to the nearest rail node,
+        create an EQ object, and attach it to the corresponding Section.
+        node_to_section: mapping of every node of the original (pre-merge) lines → Section
         """
         node_coords = list(node_map.keys())
         if not node_coords:
             return
 
-        # 모든 레이어에서 CText 수집
+        # Collect CText from all layers
         texts: List[CText] = []
         for layer in layers:
             for shape in layer.shape_list:
                 if isinstance(shape, CText):
                     texts.append(shape)
 
-        MAX_EQ_DISTANCE = 5000.0  # DXF 단위에 맞게 조정 필요 (mm 기준)
+        MAX_EQ_DISTANCE = 5000.0  # needs adjusting to the DXF units (assumes mm)
         for text in texts:
             tx, ty = text.start_x, text.start_y
             best_node = None
@@ -185,20 +185,20 @@ class RailManager:
                     best_dist = d
                     best_node = node
 
-            # ✅ 너무 멀면 매핑 스킵
+            # ✅ Skip mapping if too far away
             if best_node is None or best_dist > MAX_EQ_DISTANCE:
                 continue
 
-            # EQ 생성
+            # Create EQ
             eq_name = text.text
             if eq_name in self.data_set.eq_list:
-                continue  # 동일 이름 EQ 중복 방지
+                continue  # avoid duplicate EQs with the same name
 
             eq = EQ(eq_name)
             eq.left = tx
             eq.top = ty
 
-            # 해당 노드가 속한 Section에 연결
+            # Attach to the Section that owns the node
             section = node_to_section.get(best_node)
             if section is not None:
                 eq.section_id = section.section_id

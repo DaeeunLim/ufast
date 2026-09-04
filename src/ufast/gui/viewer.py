@@ -30,12 +30,12 @@ except Exception as _e:  # noqa: BLE001
     print(f"[viewer] ⚠️ ProductionDashboard import failed: {_e}")
 
 
-# EQ 상태 → (채움색, 테두리색) — 라이브 갱신·스냅샷 재생·범례가 공유하는 단일 소스.
-# 한 곳만 고치면 세 곳이 함께 바뀐다. (viz/replay_recorder.py 의 Rerun 색과 동일 체계)
+# EQ status → (fill color, edge color) — single source shared by live updates, snapshot playback, and the legend.
+# Change it in one place and all three follow. (Same scheme as the Rerun colors in viz/replay_recorder.py)
 EQ_STATUS_STYLES = {
-    "BUSY":    (QColor(50, 205, 50, 220),   QColor(0, 180, 0)),      # OHT 접근/가공 중
-    "INBOUND": (QColor(135, 206, 250, 220), QColor(70, 150, 210)),   # 공정 대기/입고
-    "WAITING": (QColor(255, 165, 0, 220),   QColor(200, 100, 0)),    # LOT 대기 (OHT 없음)
+    "BUSY":    (QColor(50, 205, 50, 220),   QColor(0, 180, 0)),      # OHT approaching / processing
+    "INBOUND": (QColor(135, 206, 250, 220), QColor(70, 150, 210)),   # waiting for process / inbound
+    "WAITING": (QColor(255, 165, 0, 220),   QColor(200, 100, 0)),    # LOT waiting (no OHT)
     "IDLE":    (QColor(160, 160, 160, 80),  QColor(130, 130, 130)),
 }
 
@@ -52,11 +52,11 @@ def eq_status_key(status: str) -> str:
 
 class OHTItem(QGraphicsEllipseItem):
     def __init__(self, oht: OHT):
-        # OHT 크기: 1000mm x 1000mm (반경 500mm)
+        # OHT size: 1000mm x 1000mm (radius 500mm)
         super().__init__(-500, -500, 1000, 1000)
         self.oht = oht
         self.setPen(QPen(Qt.GlobalColor.black, 10))
-        self.setZValue(10)  # 레일 위에 표시
+        self.setZValue(10)  # drawn above the rails
         self.update_color()
 
     def update_color(self):
@@ -97,7 +97,7 @@ class OHTItem(QGraphicsEllipseItem):
         ratio = max(0.0, min(1.0, ratio))
 
         if isinstance(fig, CQuadCurve):
-            # 2차 베지어 곡선 보간: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+            # Quadratic Bezier interpolation: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
             t = ratio
             mt = 1.0 - t
             x = mt * mt * fig.start_x + 2 * mt * t * fig.ctrl_x + t * t * fig.end_x
@@ -108,9 +108,9 @@ class OHTItem(QGraphicsEllipseItem):
 
         self.setPos(x, y)
 
-    # 통합: 스냅샷 값으로 위치/색상을 계산 (라이브 OHT 객체를 변경하지 않음)
+    # Integrated: compute position/color from snapshot values (does not modify the live OHT object)
     def apply_snapshot(self, section_id, enter_time, status, current_time):
-        # 색상은 status 로 직접 결정
+        # Color is determined directly from status
         config = ConfigLoader.get_instance()
         color_map = {
             "IDLE": config.get("appearance", "oht_color_idle", "#0000FF"),
@@ -156,9 +156,9 @@ class CADGraphicsView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setViewport(QOpenGLWidget())
-        # 대형 .rail(SMAT2022 등)은 정적 레일 아이템이 1만 개 이상 생성된다.
-        # FullViewportUpdate는 OHT/EQ 한 개가 바뀌어도 전체 장면을 다시 그려 화면 끊김을 유발하므로
-        # 변경된 bounding rect 중심으로만 갱신한다. 시각 기능은 유지하고 렌더링 비용만 낮춘다.
+        # Large .rail files (e.g. SMAT2022) create more than 10,000 static rail items.
+        # FullViewportUpdate redraws the whole scene even when a single OHT/EQ changes, causing stutter,
+        # so only the changed bounding rects are updated. Visual features are kept; only the render cost drops.
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
         self.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
@@ -170,7 +170,7 @@ class CADGraphicsView(QGraphicsView):
         bg_color = config.get("appearance", "background_color", "#000000")
         self.setBackgroundBrush(QBrush(QColor(bg_color)))
 
-        # Y축 반전 (CAD 좌표계 대응)
+        # Flip the Y axis (to match the CAD coordinate system)
         self.scale(1, -1)
 
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -233,12 +233,12 @@ class SimulationViewer(QMainWindow):
     fromto_file_loaded_signal = pyqtSignal(str)
     speed_changed_signal = pyqtSignal(float)
     clear_signal = pyqtSignal()
-    # 통합: 모드 선택 / 타임라인 재생 제어
+    # Integrated: mode selection / timeline playback control
     mode_changed_signal = pyqtSignal(str)            # "logistics" | "production"
-    timeline_scrubbed_signal = pyqtSignal(float)     # 0.0~1.0 진행바 비율
-    playback_toggled_signal = pyqtSignal(bool)       # True=재생, False=일시정지
-    go_live_signal = pyqtSignal()                    # 과거 탐색 → 실시간 복귀
-    # 패널 상주 옵션: 전략 설정 다이얼로그 열기 / 외부 생산 데이터셋 추가
+    timeline_scrubbed_signal = pyqtSignal(float)     # 0.0~1.0 progress-bar fraction
+    playback_toggled_signal = pyqtSignal(bool)       # True=play, False=pause
+    go_live_signal = pyqtSignal()                    # past browsing → return to real time
+    # Panel-resident options: open the strategy settings dialog / add an external production dataset
     configure_strategies_signal = pyqtSignal()
     production_add_dataset_signal = pyqtSignal()
 
@@ -248,8 +248,8 @@ class SimulationViewer(QMainWindow):
         self.resize(1200, 800)
         self.create_menu_bar()
         self.statusBar()
-        # 통합: 현재 실행 정보(데이터셋 / From-To 차트)를 상태바 우측에 상시 표시.
-        # showMessage() 로 갱신되는 임시 메시지와 달리 이 라벨은 항상 보인다.
+        # Integrated: keep the current run info (dataset / From-To chart) at the right of the status bar.
+        # Unlike the temporary messages set via showMessage(), this label is always visible.
         self.run_info_label = QLabel("")
         self.run_info_label.setStyleSheet(
             "color:#cfe3ff; padding:0 10px; font-weight:bold;"
@@ -260,7 +260,7 @@ class SimulationViewer(QMainWindow):
         self.view = CADGraphicsView(self.scene)
         self.view.mouse_scene_pos_changed.connect(self.update_status_coords)
 
-        # 통합: 중앙을 스택으로 구성 (0=물류 그래픽뷰, 1=생산 대시보드)
+        # Integrated: central area is a stack (0=logistics graphics view, 1=production dashboard)
         self.central_stack = QStackedWidget()
         self.central_stack.addWidget(self.view)              # index 0
         if _PROD_VIEW_AVAILABLE:
@@ -276,7 +276,7 @@ class SimulationViewer(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.layer_panel)
         self.toggle_layer_action.toggled.connect(self.layer_panel.setVisible)
         self.layer_panel.visibilityChanged.connect(self.toggle_layer_action.setChecked)
-        # 기본 숨김 — DXF 로딩(레일 변환 작업) 시 앱 쪽에서 다시 표시한다.
+        # Hidden by default — the app shows it again when a DXF is loaded (rail conversion work).
         self.layer_panel.hide()
 
         # Simulation Panel
@@ -285,32 +285,32 @@ class SimulationViewer(QMainWindow):
         self.toggle_control_action.toggled.connect(self.control_dock.setVisible)
         self.control_dock.visibilityChanged.connect(self.toggle_control_action.setChecked)
 
-        # Results Panel — 통계·범례. 시뮬레이션 실행 시에만 표시
+        # Results Panel — statistics and legends. Shown only while a simulation runs
         self._create_results_panel()
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.results_dock)
         self.toggle_results_action.toggled.connect(self.results_dock.setVisible)
         self.results_dock.visibilityChanged.connect(self.toggle_results_action.setChecked)
         self.results_dock.hide()
 
-        # 통합: 타임라인(과거 재생) 패널 — 하단 도크
+        # Integrated: timeline (past playback) panel — bottom dock
         self._create_timeline_panel()
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.timeline_dock)
         self.toggle_timeline_action.toggled.connect(self.timeline_dock.setVisible)
         self.timeline_dock.visibilityChanged.connect(self.toggle_timeline_action.setChecked)
 
         self.oht_items = {}
-        self._playback_mode = False   # 통합: 타임라인 재생 중 라이브 애니메이션 정지 플래그
-        self._reviewing = False       # 통합: 과거 탐색(리뷰) 중 여부
+        self._playback_mode = False   # Integrated: flag that pauses the live animation during timeline playback
+        self._reviewing = False       # Integrated: whether the user is browsing the past (review)
 
-        # ✅ EQ 아이템 관리 (사각형/텍스트 분리)
+        # ✅ EQ item management (rectangles and text kept separate)
         self.eq_items = {}
         self.eq_text_items = {}
-        # 대형 layout에서 매 프레임 1,000개 이상 EQ의 brush/pen/text를 재설정하면
-        # GUI thread가 막힌다. 마지막 렌더 상태를 보관해 바뀐 EQ만 갱신한다.
+        # On large layouts, resetting brush/pen/text for 1,000+ EQs every frame blocks the
+        # GUI thread. Keep the last rendered state and update only the EQs that changed.
         self._eq_render_state = {}
         self._eq_update_counter = 0
 
-        # ✅ EQ 표시 토글 상태
+        # ✅ EQ display toggle state
         self.show_eq = True
         self.show_eq_text = True
 
@@ -342,7 +342,7 @@ class SimulationViewer(QMainWindow):
         run_row.addWidget(self.stop_button)
         main_layout.addLayout(run_row)
 
-        # ── 통합: 시뮬레이터 모드 선택 ──
+        # ── Integrated: simulator mode selection ──
         mode_group = QGroupBox("Simulator Mode")
         mode_layout = QVBoxLayout(mode_group)
         self.mode_combo = QComboBox()
@@ -352,7 +352,7 @@ class SimulationViewer(QMainWindow):
         mode_layout.addWidget(self.mode_combo)
         main_layout.addWidget(mode_group)
 
-        # ── Input Files (물류) — 로딩된 레이아웃/From-To 파일 표시 ──
+        # ── Input Files (logistics) — show the loaded layout/From-To files ──
         self.input_files_group = QGroupBox("Input Files")
         fform = QFormLayout(self.input_files_group)
         fform.setContentsMargins(6, 6, 6, 6)
@@ -370,13 +370,13 @@ class SimulationViewer(QMainWindow):
         fform.addRow("Production:", self.production_data_label)
         main_layout.addWidget(self.input_files_group)
 
-        # ── Run Options (물류) — Run 시점 다이얼로그 대신 패널에 상주 ──
+        # ── Run Options (logistics) — resident in the panel instead of a dialog at Run time ──
         self.logistics_options_group = QGroupBox("Run Options")
         lform = QFormLayout(self.logistics_options_group)
         lform.setContentsMargins(6, 6, 6, 6)
 
-        # 실행 방식: live=개체 동작 검증(실시간 애니메이션) /
-        #           replay=집계 분석(전속력 기록 → Rerun 뷰어에서 재생)
+        # Run mode: live = verify entity behaviour (real-time animation) /
+        #           replay = aggregate analysis (full-speed recording → played back in the Rerun viewer)
         self.run_mode_combo = QComboBox()
         self.run_mode_combo.addItem("Live (animate while running)", "live")
         self.run_mode_combo.addItem("Replay (record → Rerun viewer)", "replay")
@@ -399,8 +399,8 @@ class SimulationViewer(QMainWindow):
         self.kpi_combo.setCurrentIndex(2)
         lform.addRow("Result-saving basis", self.kpi_combo)
 
-        # 주의: PySCFabSim 생산 모드가 아니라, 물류 시뮬레이션 중 EQ 가공
-        # 체류시간(기본 처리시간)을 반영할지 여부다. From-To 만으로 동작한다.
+        # Note: this is not the PySCFabSim production mode; it controls whether EQ processing
+        # dwell time (default processing time) is applied during the AMHS simulation. Works with From-To only.
         self.sim_mode_combo = QComboBox()
         self.sim_mode_combo.addItem("Transport only", "from_to_only")
         self.sim_mode_combo.addItem("Transport + EQ processing", "production_logistics")
@@ -421,13 +421,13 @@ class SimulationViewer(QMainWindow):
         self.sim_mode_combo.currentIndexChanged.connect(self._refresh_logistics_option_state)
         main_layout.addWidget(self.logistics_options_group)
 
-        # ── Run Options (생산) ──
+        # ── Run Options (production) ──
         self.production_options_group = QGroupBox("Run Options")
         pform = QFormLayout(self.production_options_group)
         pform.setContentsMargins(6, 6, 6, 6)
 
-        # 생산 데이터셋은 자동 발견하지 않는다 — 사용자가 File → Production
-        # Data → Add Dataset Folder… 로 명시적으로 추가해야 목록에 뜬다.
+        # Production datasets are not auto-discovered — the user must add them explicitly via
+        # File → Production Data → Add Dataset Folder… for them to appear in the list.
         self.dataset_combo = QComboBox()
         pform.addRow("Dataset", self.dataset_combo)
 
@@ -462,7 +462,7 @@ class SimulationViewer(QMainWindow):
         self.production_options_group.setVisible(False)
         main_layout.addWidget(self.production_options_group)
 
-        # From-To 만 입력된 상태(설비 정보 없음)에서는 생산 모드 선택 불가
+        # Production mode cannot be selected when only From-To is loaded (no equipment info)
         self._update_production_mode_item()
         self._update_production_data_label()
         self.dataset_combo.currentIndexChanged.connect(self._update_production_data_label)
@@ -475,7 +475,7 @@ class SimulationViewer(QMainWindow):
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setMinimum(1)
         self.speed_slider.setMaximum(200)  # 0.1x ~ 20.0x
-        self.speed_slider.setValue(10)     # 기본 1.0x
+        self.speed_slider.setValue(10)     # default 1.0x
         self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.speed_slider.setTickInterval(10)
         self.speed_label = QLabel("1.0x")
@@ -489,7 +489,7 @@ class SimulationViewer(QMainWindow):
         self.speed_slider.valueChanged.connect(self._on_speed_changed)
         main_layout.addWidget(speed_group)
 
-        # ✅ ── EQ Display (요청사항) ──
+        # ✅ ── EQ Display (requested feature) ──
         eq_group = QGroupBox("EQ Display")
         eq_layout = QVBoxLayout(eq_group)
 
@@ -507,7 +507,7 @@ class SimulationViewer(QMainWindow):
 
         main_layout.addStretch()
 
-        # 옵션 그룹이 늘어나 세로로 길어졌으므로 스크롤 가능하게 감싼다.
+        # The option groups have grown vertically, so wrap them in a scroll area.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -516,7 +516,7 @@ class SimulationViewer(QMainWindow):
         self._refresh_logistics_option_state()
 
     def _create_results_panel(self):
-        """통계·범례 도크 — 시뮬레이션 실행 시에만 표시되는 결과 패널."""
+        """Statistics/legend dock — results panel shown only while a simulation runs."""
         self.results_dock = QDockWidget("Results", self)
         self.results_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -555,7 +555,7 @@ class SimulationViewer(QMainWindow):
         for row, (text, key) in enumerate(labels):
             lbl = QLabel(text)
             if key.startswith("stat_sep_"):
-                # 섹션 구분 헤더 — 값 칸 없이 두 칸을 합쳐 표시
+                # Section header — spans both columns, no value cell
                 lbl.setStyleSheet("color:#7fd0ff; font-weight:bold;")
                 stat_layout.addWidget(lbl, row, 0, 1, 2)
                 continue
@@ -574,7 +574,7 @@ class SimulationViewer(QMainWindow):
 
         config = ConfigLoader.get_instance()
         legend_items = [
-            # REPOSITIONING 은 IDLE 과 같은 색을 쓴다 (OHTItem.update_color 참조)
+            # REPOSITIONING uses the same color as IDLE (see OHTItem.update_color)
             ("IDLE / REPOSITIONING", config.get("appearance", "oht_color_idle", "#0000FF")),
             ("ASSIGNED", config.get("appearance", "oht_color_assigned", "#00FF00")),
             ("LOADED", config.get("appearance", "oht_color_loaded", "#FF0000")),
@@ -594,7 +594,7 @@ class SimulationViewer(QMainWindow):
         eq_legend_layout = QGridLayout(eq_legend_group)
         eq_legend_layout.setContentsMargins(6, 6, 6, 6)
 
-        # 색은 EQ_STATUS_STYLES 단일 소스에서 가져온다
+        # Colors come from the single source EQ_STATUS_STYLES
         eq_legend_items = [
             ("IDLE (No Lot)",           EQ_STATUS_STYLES["IDLE"][0].name()),
             ("WAITING (Lot, No OHT)",   EQ_STATUS_STYLES["WAITING"][0].name()),
@@ -622,13 +622,13 @@ class SimulationViewer(QMainWindow):
         self.speed_label.setText(f"{speed:.1f}x")
         self.speed_changed_signal.emit(speed)
 
-    # ── 패널 상주 Run Options ─────────────────────────────────
+    # ── Panel-resident Run Options ────────────────────────────
     def _update_production_mode_item(self):
-        """생산 모드 선택 가능 여부 갱신.
+        """Refresh whether production mode can be selected.
 
-        From-To 는 설비 정보가 없으므로 생산(PySCFabSim) 모드의 입력이 될 수
-        없다 — 유효한 생산 데이터셋(내장 datasets/ 또는 외부 폴더)이 하나도
-        없으면 Production 항목을 비활성화한다.
+        From-To carries no equipment information, so it cannot serve as input for the
+        production (PySCFabSim) mode — disable the Production item when no valid production
+        dataset (built-in datasets/ or an external folder) is available.
         """
         item = self.mode_combo.model().item(1)
         if item is None:
@@ -644,7 +644,7 @@ class SimulationViewer(QMainWindow):
             self.mode_combo.setItemText(1, "Production (PySCFabSim)")
 
     def _update_production_data_label(self, _idx=0):
-        """Input Files 의 Production 데이터셋 라벨을 콤보 선택과 동기화."""
+        """Sync the Production dataset label in Input Files with the combo selection."""
         if self.dataset_combo.count() == 0 or self.dataset_combo.currentData() is None:
             self.production_data_label.setText("(not added)")
             self.production_data_label.setStyleSheet("color:#999;")
@@ -653,7 +653,7 @@ class SimulationViewer(QMainWindow):
             self.production_data_label.setStyleSheet("font-weight:bold;")
 
     def _refresh_logistics_option_state(self, _idx=0):
-        """KPI 기준/시뮬레이터 모드 조합에 따른 옵션 활성화 규칙."""
+        """Option enable/disable rules for the KPI basis / simulator mode combination."""
         kpi = self.kpi_combo.currentData()
         if kpi == "logistics":
             i = self.sim_mode_combo.findData("from_to_only")
@@ -682,7 +682,7 @@ class SimulationViewer(QMainWindow):
         }
 
     def get_production_options(self):
-        """생산 실행 옵션. 데이터셋이 없으면 None."""
+        """Production run options. None when no dataset is available."""
         if self.dataset_combo.count() == 0 or self.dataset_combo.currentData() is None:
             return None
         return {
@@ -695,14 +695,14 @@ class SimulationViewer(QMainWindow):
         }
 
     def add_production_dataset(self, path: str):
-        """외부 데이터셋 폴더를 콤보에 추가하고 선택한다 (검증은 앱 쪽 책임)."""
+        """Add an external dataset folder to the combo and select it (validation is the app's job)."""
         import os
         idx = self.dataset_combo.findData(path)
         if idx < 0:
             self.dataset_combo.addItem(f"[External] {os.path.basename(path)}", path)
             idx = self.dataset_combo.count() - 1
         self.dataset_combo.setCurrentIndex(idx)
-        # 데이터셋이 생겼으므로 생산 모드 선택 가능 여부 재평가
+        # A dataset is now available, so re-evaluate whether production mode can be selected
         self._update_production_mode_item()
 
     def set_layout_file_label(self, name: str):
@@ -710,7 +710,7 @@ class SimulationViewer(QMainWindow):
         self.layout_file_label.setStyleSheet("font-weight:bold;")
 
     def set_fromto_file_label(self, name: str, count: int):
-        # 파일명과 레코드 수를 명시적 두 줄로 — 도크 폭에서 잘리지 않게 한다
+        # File name and record count on two explicit lines — so they are not clipped by the dock width
         self.fromto_file_label.setText(f"{name}\n{count:,} records")
         self.fromto_file_label.setStyleSheet("font-weight:bold;")
 
@@ -724,42 +724,42 @@ class SimulationViewer(QMainWindow):
         self.strategy_button.setText(f"Custom strategies… {suffix}")
 
     def set_options_locked(self, locked: bool):
-        """실행 중에는 Run 옵션·모드 변경을 잠근다."""
+        """Lock Run options and mode changes while a simulation runs."""
         self.run_button.setEnabled(not locked)
         self.stop_button.setEnabled(locked)
         self.mode_combo.setEnabled(not locked)
         self.logistics_options_group.setEnabled(not locked)
         self.production_options_group.setEnabled(not locked)
 
-    # ── 통합: 모드 전환 ───────────────────────────────────────
+    # ── Integrated: mode switching ────────────────────────────
     def _on_mode_combo_changed(self, _idx):
         mode = self.mode_combo.currentData()
         self.set_mode(mode)
         self.mode_changed_signal.emit(mode)
 
     def set_run_info(self, text: str):
-        """상태바 우측에 현재 실행 정보(데이터셋/From-To 차트)를 상시 표시."""
+        """Keep the current run info (dataset / From-To chart) shown at the right of the status bar."""
         self.run_info_label.setText(text)
 
     def set_mode(self, mode: str):
-        """중앙 화면과 Run Options 그룹을 모드에 맞게 전환한다."""
+        """Switch the central view and Run Options group to match the mode."""
         self.current_mode = mode
         if mode == "production" and self.production_dashboard is not None:
             self.central_stack.setCurrentIndex(1)
         else:
             self.central_stack.setCurrentIndex(0)
         show_prod = (mode == "production")
-        # Input Files 는 세 입력(Layout/From-To/Production)을 항상 보여준다
+        # Input Files always shows all three inputs (Layout/From-To/Production)
         self.logistics_options_group.setVisible(not show_prod)
         self.production_options_group.setVisible(show_prod)
-        # combo 동기화 (외부에서 호출된 경우)
+        # Sync the combo (when called externally)
         idx = self.mode_combo.findData(mode)
         if idx >= 0 and self.mode_combo.currentIndex() != idx:
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentIndex(idx)
             self.mode_combo.blockSignals(False)
 
-    # ── 통합: 타임라인(과거 재생) 패널 ────────────────────────
+    # ── Integrated: timeline (past playback) panel ────────────
     def _create_timeline_panel(self):
         self.timeline_dock = QDockWidget("Timeline / Playback", self)
         self.timeline_dock.setAllowedAreas(
@@ -769,14 +769,14 @@ class SimulationViewer(QMainWindow):
         row = QHBoxLayout(container)
         row.setContentsMargins(8, 4, 8, 4)
 
-        # ● LIVE 버튼: 과거 탐색 중 현재(실시간)로 복귀
+        # ● LIVE button: return to the present (real time) while browsing the past
         self.live_button = QPushButton("● LIVE")
         self.live_button.setFixedWidth(80)
         self.live_button.setStyleSheet("color:#e33; font-weight:bold;")
         self.live_button.clicked.connect(self._on_go_live)
         row.addWidget(self.live_button)
 
-        # ▶ Play/Pause: (시뮬레이션 정지 상태에서) 기록을 비디오처럼 재생
+        # ▶ Play/Pause: (while the simulation is stopped) replay the recording like a video
         self.play_button = QPushButton("▶ Play")
         self.play_button.setCheckable(True)
         self.play_button.setFixedWidth(90)
@@ -798,17 +798,17 @@ class SimulationViewer(QMainWindow):
         self.timeline_dock.setWidget(container)
         self._timeline_duration = 0.0
         self._timeline_start = 0.0
-        self._sim_is_live = False     # 시뮬레이션이 실시간 진행 중인지
+        self._sim_is_live = False     # whether the simulation is running in real time
         self._update_live_button()
 
     def set_live_running(self, running: bool):
-        """시뮬레이션 실시간 진행 여부를 패널에 알린다."""
+        """Tell the panel whether the simulation is running in real time."""
         self._sim_is_live = running
         self._update_live_button()
         self.set_options_locked(running)
 
     def _update_live_button(self):
-        # LIVE 버튼은 '실시간 진행 중'이고 '현재 과거를 보고 있을 때'만 활성화 의미가 있다.
+        # The LIVE button is only meaningful while 'running in real time' and 'currently viewing the past'.
         on = getattr(self, "_reviewing", False)
         if self._sim_is_live:
             self.live_button.setEnabled(True)
@@ -818,7 +818,7 @@ class SimulationViewer(QMainWindow):
             else:
                 self.live_button.setText("● LIVE")
                 self.live_button.setStyleSheet("color:#e33; font-weight:bold;")
-            # 실시간 중에는 Play(과거재생) 비활성
+            # Play (past replay) is disabled while running in real time
             self.play_button.setEnabled(False)
         else:
             self.live_button.setEnabled(False)
@@ -834,8 +834,8 @@ class SimulationViewer(QMainWindow):
         self.playback_toggled_signal.emit(checked)
 
     def _on_timeline_pressed(self):
-        # 스크럽 시작 시: 정지 상태면 재생을 멈춘다.
-        # (실시간 진행 중이면 시뮬레이션은 건드리지 않고 '과거 보기'로만 들어간다.)
+        # On scrub start: if stopped, halt playback.
+        # (If running in real time, leave the simulation alone and only enter 'review' mode.)
         if not self._sim_is_live and self.play_button.isChecked():
             self.play_button.setChecked(False)
 
@@ -844,16 +844,16 @@ class SimulationViewer(QMainWindow):
         self.timeline_scrubbed_signal.emit(frac)
 
     def set_reviewing(self, reviewing: bool):
-        """과거 탐색(리뷰) 상태 표시 갱신."""
+        """Refresh the past-browsing (review) state indicator."""
         self._reviewing = reviewing
         self._update_live_button()
 
     def set_timeline_enabled(self, enabled: bool):
-        """타임라인 진행바/Play 사용 가능 여부 (결과 우선 모드에서 비활성화)."""
+        """Enable/disable the timeline progress bar and Play (disabled in results-first mode)."""
         self.timeline_slider.setEnabled(enabled)
         if not enabled and self.play_button.isChecked():
             self.play_button.setChecked(False)
-        # 재생이 불가능한 상태에서는 Play 버튼도 비활성화
+        # Also disable the Play button when playback is not possible
         if not self._sim_is_live:
             self.play_button.setEnabled(enabled)
 
@@ -862,7 +862,7 @@ class SimulationViewer(QMainWindow):
         self._timeline_duration = duration
 
     def set_timeline_position(self, frac: float, sim_time: float, label_days: bool = False):
-        """외부(앱)에서 재생 위치를 슬라이더에 반영."""
+        """Reflect the playback position on the slider (called from the app)."""
         v = int(max(0.0, min(1.0, frac)) * 1000)
         if self.timeline_slider.value() != v:
             self.timeline_slider.blockSignals(True)
@@ -873,14 +873,14 @@ class SimulationViewer(QMainWindow):
         else:
             self.timeline_time_label.setText(f"t = {sim_time:.1f}s")
 
-    # ✅ EQ 토글 핸들러
+    # ✅ EQ toggle handlers
     def _on_toggle_eq(self, state):
         self.show_eq = (state == Qt.CheckState.Checked.value)
 
         for _, item in self.eq_items.items():
             item.setVisible(self.show_eq)
 
-        # EQ가 꺼지면 텍스트도 같이 꺼짐
+        # When EQ is hidden, the text is hidden as well
         for _, t in self.eq_text_items.items():
             t.setVisible(self.show_eq and self.show_eq_text)
 
@@ -896,7 +896,7 @@ class SimulationViewer(QMainWindow):
         total = ds.lot_count
         oht_count = len(ds.oht_list)
 
-        # [최적화] 단일 순회로 4가지 상태 카운트
+        # [Optimization] count the 4 states in a single pass
         idle = repositioning = assigned = loaded = 0
         for o in ds.oht_list.values():
             s = o.status
@@ -925,7 +925,7 @@ class SimulationViewer(QMainWindow):
         self._stat_labels["stat_other"].setText(str(other))
         self._stat_labels["stat_throughput"].setText(f"{throughput:.1f} lots/h")
 
-        # ── 추가 물류/생산 KPI (SimulationLogger 누적치 기반) ──
+        # ── Additional logistics/production KPIs (based on SimulationLogger accumulators) ──
         try:
             from ufast.common.logger import get_logger
             k = get_logger().get_live_kpis()
@@ -937,13 +937,13 @@ class SimulationViewer(QMainWindow):
                 f"{rd:.1f}s" if k['rundown_count'] else "-")
             self._stat_labels["stat_wip"].setText(str(k['wip']))
         except Exception:
-            # 로거가 아직 준비되지 않았으면 조용히 건너뜀
+            # Silently skip if the logger is not ready yet
             pass
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
 
-        # File — 파일 종류별 그룹핑: Layout(DXF/Rail) / Flow Data(FromTo)
+        # File — grouped by file type: Layout(DXF/Rail) / Flow Data(FromTo)
         file_menu = menu_bar.addMenu("&File")
 
         layout_menu = file_menu.addMenu("&Layout")
@@ -970,7 +970,7 @@ class SimulationViewer(QMainWindow):
         load_fromto_action.triggered.connect(self.load_fromto_dialog)
         flow_menu.addAction(load_fromto_action)
 
-        # 생산(PySCFabSim) 데이터셋 — 폴더가 추가되어야 생산 모드가 열린다
+        # Production (PySCFabSim) datasets — production mode opens only after a folder is added
         prod_menu = file_menu.addMenu("&Production Data")
 
         add_prod_dataset_action = QAction("Add Dataset &Folder...", self)
@@ -1052,7 +1052,7 @@ class SimulationViewer(QMainWindow):
         self.statusBar().showMessage(f"X: {x:.1f}  Y: {y:.1f}")
 
     def clear_all(self):
-        # 로딩 데이터·시뮬레이션 상태가 전부 사라지므로 실행 전에 확인을 받는다.
+        # All loaded data and simulation state will be lost, so ask for confirmation first.
         answer = QMessageBox.question(
             self,
             "Reset All",
@@ -1094,7 +1094,7 @@ class SimulationViewer(QMainWindow):
             ys = [fig.start_y, fig.ctrl_y, fig.end_y]
             return min(xs), min(ys), max(xs), max(ys)
         elif isinstance(fig, CText):
-            r = 200  # 표시용 크기(필요시 조절)
+            r = 200  # display size (adjust if needed)
             dot = QGraphicsEllipseItem(fig.start_x - r, fig.start_y - r, 2 * r, 2 * r)
             dot.setPen(QPen(pen.color(), max(1, int(pen.widthF() * 0.2))))
             dot.setBrush(QBrush(pen.color()))
@@ -1102,7 +1102,7 @@ class SimulationViewer(QMainWindow):
 
             txt = QGraphicsSimpleTextItem(fig.text)
             txt.setBrush(QBrush(pen.color()))
-            txt.setTransform(QTransform(1, 0, 0, -1, 0, 0))  # Y반전 보정
+            txt.setTransform(QTransform(1, 0, 0, -1, 0, 0))  # compensate for the Y flip
             txt.setPos(fig.start_x + r * 1.2, fig.start_y + r * 0.5)
             self.scene.addItem(txt)
 
@@ -1177,13 +1177,13 @@ class SimulationViewer(QMainWindow):
                     progress.setValue(drawn)
                     QApplication.processEvents()
 
-        # ✅ EQ 표시
+        # ✅ EQ display
         self.eq_items.clear()
         self.eq_text_items.clear()
         self._eq_render_state.clear()
 
         eq_size = rail_width * 6
-        # EQ 초기 색상은 IDLE (회색) - 시뮬레이션 중 update_animation에서 동적 변경
+        # Initial EQ color is IDLE (gray) - changed dynamically in update_animation during the simulation
         idle_fill, idle_edge = EQ_STATUS_STYLES["IDLE"]
         pen_eq_idle = QPen(idle_edge, rail_width * 0.5)
         brush_eq_idle = QBrush(idle_fill)
@@ -1201,9 +1201,9 @@ class SimulationViewer(QMainWindow):
 
             text_item = QGraphicsSimpleTextItem(eq_name)
             text_item.setFont(font_eq)
-            text_item.setBrush(QBrush(QColor(200, 200, 200)))  # 흰색 계열 텍스트
+            text_item.setBrush(QBrush(QColor(200, 200, 200)))  # whitish text
             text_item.setZValue(6)
-            text_item.setTransform(QTransform(1, 0, 0, -1, 0, 0))  # 텍스트 뒤집힘 방지
+            text_item.setTransform(QTransform(1, 0, 0, -1, 0, 0))  # keep the text from being flipped
             text_item.setPos(x + eq_size * 0.6, y + eq_size * 0.2)
             self.scene.addItem(text_item)
 
@@ -1223,17 +1223,17 @@ class SimulationViewer(QMainWindow):
             self.scene.setSceneRect(rect)
             self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
-        # ✅ 현재 토글 상태 즉시 반영
+        # ✅ Apply the current toggle state immediately
         self._on_toggle_eq(Qt.CheckState.Checked.value if self.show_eq else Qt.CheckState.Unchecked.value)
         self._on_toggle_eq_text(Qt.CheckState.Checked.value if self.show_eq_text else Qt.CheckState.Unchecked.value)
 
     def update_animation(self):
-        # 통합: 재생(scrub) 중에는 라이브 애니메이션을 멈추고 스냅샷만 표시
+        # Integrated: during playback (scrub), pause the live animation and show only the snapshot
         if getattr(self, "_playback_mode", False):
             return
         current_time = self.data_set.main_clock
 
-        # OHT 생성 및 업데이트
+        # Create and update OHTs
         for name, oht in self.data_set.oht_list.items():
             if name not in self.oht_items:
                 item = OHTItem(oht)
@@ -1241,9 +1241,9 @@ class SimulationViewer(QMainWindow):
                 self.oht_items[name] = item
             self.oht_items[name].update_position(current_time)
 
-        # EQ 상태별 색상 업데이트
-        # 대형 SMAT2022 layout은 EQ가 1,000개 이상이므로 매 프레임 전체 EQ를 재도색하지 않는다.
-        # 상태/대기 LOT 수가 바뀐 항목만 갱신하고, 전체 스캔도 약 100ms 단위로 제한한다.
+        # Update EQ colors by status
+        # The large SMAT2022 layout has 1,000+ EQs, so not every EQ is repainted every frame.
+        # Only items whose status/waiting LOT count changed are updated, and full scans are limited to ~100ms.
         self._eq_update_counter += 1
         if self._eq_update_counter % 6 == 0:
             for eq_name, rect_item in self.eq_items.items():
@@ -1267,23 +1267,23 @@ class SimulationViewer(QMainWindow):
                 elif text_item:
                     text_item.setText(eq_name)
 
-        # 통계 갱신
+        # Refresh statistics
         if not hasattr(self, "_stat_counter"):
             self._stat_counter = 0
         self._stat_counter += 1
         if self._stat_counter % 10 == 0:
             self.update_statistics()
-        # 명시적 전체 viewport 갱신은 하지 않는다. 변경된 QGraphicsItem만 자동 invalidation된다.
+        # No explicit full-viewport update; only the changed QGraphicsItems are invalidated automatically.
 
-    # ── 통합: 타임라인 스냅샷 렌더 (과거 재생) ────────────────
+    # ── Integrated: timeline snapshot rendering (past playback) ─
     def render_logistics_snapshot(self, snap):
         """
-        TimelineRecorder 의 물류 스냅샷을 화면에 복원한다.
+        Restore a logistics snapshot from the TimelineRecorder on screen.
 
-        중요: 라이브 OHT 데이터 객체를 변경하지 않는다(apply_snapshot 사용).
-        따라서 시뮬레이션이 백그라운드에서 계속 진행 중이어도 과거 장면을
-        안전하게 들여다볼 수 있다. update_animation 은 _playback_mode 플래그로
-        잠시 멈춰 라이브 렌더와 충돌하지 않게 한다.
+        Important: does not modify the live OHT data objects (uses apply_snapshot).
+        The past scene can therefore be inspected safely even while the simulation keeps
+        running in the background. update_animation is paused via the _playback_mode flag
+        so it does not clash with the live render.
         """
         self._playback_mode = True
         ds = self.data_set
@@ -1315,5 +1315,5 @@ class SimulationViewer(QMainWindow):
                 text_item.setText(f"{eq_name} [{lot_count}]" if lot_count > 0 else eq_name)
 
     def exit_playback_mode(self):
-        """재생/리뷰 모드 해제 → 라이브 애니메이션 재개."""
+        """Leave playback/review mode → resume the live animation."""
         self._playback_mode = False

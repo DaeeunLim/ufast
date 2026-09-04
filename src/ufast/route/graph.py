@@ -1,8 +1,8 @@
 """
-graph.py - 네트워크 데이터 구조
+graph.py - network data structures
 
-Java RouteManager의 CNode, CSection을 포팅.
-노드, 링크, 섹션으로 구성된 레일 네트워크를 표현한다.
+Ports CNode and CSection from the Java RouteManager.
+Represents a rail network made of nodes, links, and sections.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from typing import Dict, List, Optional, Tuple
 @dataclass
 class Node:
     """
-    레일 네트워크의 노드.
-    Java CNode에서 시뮬레이션에 필요한 필드만 포팅.
-    실시간 차량 관리 필드(m_vtDriveVehicleList 등)는 제외.
+    A node of the rail network.
+    Ports only the fields of Java CNode that the simulation needs.
+    Real-time vehicle management fields (m_vtDriveVehicleList etc.) are omitted.
     """
     name: str
     x: float
@@ -28,49 +28,49 @@ class Node:
     virtual: bool = False
     traffic_penalty: float = 1.0
 
-    # 소속 섹션 목록 (섹션 이름)
+    # Sections this node belongs to (section names)
     section_list: List[str] = field(default_factory=list)
 
-    # 인접 노드별 이동 시간 {neighbor_name: move_in_time}
+    # Travel time per neighbouring node {neighbor_name: move_in_time}
     # Java: m_htMoveInNodeTable
     move_in_times: Dict[str, float] = field(default_factory=dict)
 
-    # 인접 노드별 이동 방향 {neighbor_name: direction}
+    # Travel direction per neighbouring node {neighbor_name: direction}
     # Java: m_htMoveInDirectionTable (True=forward, False=backward)
     move_in_directions: Dict[str, bool] = field(default_factory=dict)
 
-    # Dijkstra 탐색용 임시 필드
+    # Scratch fields for Dijkstra search
     arrived_time: float = float('inf')
     arrived_length: float = float('inf')
-    prev_node: Optional[str] = None  # 이전 노드 이름
+    prev_node: Optional[str] = None  # name of the previous node
     visited: bool = False
 
-    # 커브 끝점 여부 (Java: m_bForwardCurveEnd, m_bBackwardCurveEnd)
+    # Curve end-point flags (Java: m_bForwardCurveEnd, m_bBackwardCurveEnd)
     forward_curve_end: bool = False
     backward_curve_end: bool = False
 
-    # 노드 각도 (LINE 섹션의 방향)
+    # Node angle (direction of the LINE section)
     angle: int = -1
 
     def get_length(self, other: Node) -> float:
-        """두 노드 간 유클리드 거리"""
+        """Euclidean distance between two nodes"""
         return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
 
     def set_move_in_time(self, time: float, neighbor_name: str, forward: bool):
         """
-        인접 노드까지의 이동 시간 설정.
+        Set the travel time to a neighbouring node.
         Java: CNode.SetMoveInTime(dblMoveInTime, Node, bForward)
         """
         self.move_in_times[neighbor_name] = time
         self.move_in_directions[neighbor_name] = forward
 
     def add_section(self, section_name: str):
-        """노드가 속한 섹션 추가"""
+        """Add a section this node belongs to"""
         if section_name not in self.section_list:
             self.section_list.append(section_name)
 
     def reset_search(self, max_cost: float = float('inf')):
-        """Dijkstra 탐색 상태 초기화"""
+        """Reset the Dijkstra search state"""
         self.arrived_time = max_cost
         self.arrived_length = max_cost
         self.prev_node = None
@@ -82,8 +82,8 @@ class Node:
         prev_node_name: Optional[str] = None,
     ) -> bool:
         """
-        Dijkstra에서 도착 시간 갱신.
-        더 짧은 경로가 발견되면 갱신하고 True 반환.
+        Update the arrival time during Dijkstra.
+        If a shorter path is found, update and return True.
         Java: CNode.SetArrivedTime
         """
         if time < self.arrived_time:
@@ -99,7 +99,7 @@ class Node:
         prev_node_name: Optional[str] = None,
     ) -> bool:
         """
-        CostSearch용 도착 시간/거리 갱신.
+        Update the arrival time/distance for CostSearch.
         Java: CNode.SetCostArrivedTime
         """
         if time < self.arrived_time:
@@ -113,43 +113,43 @@ class Node:
 @dataclass
 class Link:
     """
-    두 노드를 연결하는 링크 (레일 구간).
-    Java의 AddLink에서 Section으로 관리되는 노드 쌍.
+    A link connecting two nodes (a rail segment).
+    The node pair managed as a Section by Java's AddLink.
     """
     from_node: str
     to_node: str
     section_name: str
     link_type: str = "LINE"  # LINE or CURVE
     two_way: bool = False
-    distance: float = 0.0  # 자동 계산
+    distance: float = 0.0  # computed automatically
 
 
 class NetworkSection:
     """
-    레일 네트워크의 섹션 (노드의 순서 있는 집합).
-    Java CSection을 포팅.
+    A section of the rail network (an ordered set of nodes).
+    Ports Java CSection.
 
-    Note: core.components.Section (시뮬레이션용 섹션)과 구분하기 위해
-    NetworkSection으로 명명.
+    Note: named NetworkSection to distinguish it from
+    core.components.Section (the simulation section).
     """
 
     def __init__(self, name: str, section_type: str = "LINE", two_way: bool = False):
         self.name = name
         self.section_type = section_type  # LINE or CURVE
         self.two_way = two_way
-        self.node_list: List[str] = []  # 노드 이름의 순서 리스트
-        self.node_index: Dict[str, int] = {}  # 노드 이름 → 인덱스 (Java: m_htNodeTable)
+        self.node_list: List[str] = []  # ordered list of node names
+        self.node_index: Dict[str, int] = {}  # node name → index (Java: m_htNodeTable)
 
     def add_node(self, node_name: str):
-        """섹션에 노드 추가"""
+        """Add a node to the section"""
         self.node_list.append(node_name)
 
     def make_hash_table(self):
-        """노드 인덱스 테이블 생성 (Java: MakeHashTable)"""
+        """Build the node index table (Java: MakeHashTable)"""
         self.node_index = {name: i for i, name in enumerate(self.node_list)}
 
     def find_node(self, node_name: str) -> int:
-        """노드 인덱스 반환. 없으면 -1 (Java: FindNode)"""
+        """Return the node index, or -1 if absent (Java: FindNode)"""
         return self.node_index.get(node_name, -1)
 
     @property
@@ -172,8 +172,8 @@ class NetworkSection:
 
 class Network:
     """
-    레일 네트워크 전체 구조.
-    노드, 링크, 섹션, 설비 매핑을 관리한다.
+    The complete rail network structure.
+    Manages nodes, links, sections, and equipment mappings.
     """
 
     def __init__(self):
@@ -181,11 +181,11 @@ class Network:
         self.links: List[Link] = []
         self.sections: Dict[str, NetworkSection] = {}
 
-        # 설비 ↔ 노드 매핑
-        self.eq_to_node: Dict[str, str] = {}  # 설비명 → 노드명
-        self.node_to_eq: Dict[str, str] = {}  # 노드명 → 설비명
+        # Equipment ↔ node mapping
+        self.eq_to_node: Dict[str, str] = {}  # equipment name → node name
+        self.node_to_eq: Dict[str, str] = {}  # node name → equipment name
 
-        # 비활성/가상 노드 목록
+        # Disabled / virtual node lists
         self.disabled_nodes: List[str] = []
         self.virtual_nodes: List[str] = []
 
@@ -202,9 +202,9 @@ class Network:
         traffic_penalty: float = 1.0,
     ) -> Node:
         """
-        네트워크에 노드 추가.
+        Add a node to the network.
         Java: RouteManager.AddNode()
-        이미 존재하면 기존 노드 반환.
+        If it already exists, return the existing node.
         """
         if name in self.nodes:
             return self.nodes[name]
@@ -232,25 +232,25 @@ class Network:
         second_node_name: str,
     ) -> Optional[Link]:
         """
-        두 노드를 연결하는 링크 추가.
+        Add a link connecting two nodes.
         Java: RouteManager.AddLink()
 
-        섹션이 없으면 생성하고, 노드를 섹션에 추가한다.
+        Creates the section if it does not exist and adds the nodes to it.
         """
         first_node = self.nodes.get(first_node_name)
         second_node = self.nodes.get(second_node_name)
         if first_node is None or second_node is None:
             return None
 
-        # 섹션 생성 또는 조회
+        # Create or look up the section
         if section_name not in self.sections:
             section = NetworkSection(section_name, section_type, two_way)
             self.sections[section_name] = section
         else:
             section = self.sections[section_name]
 
-        # 노드를 섹션에 추가 (중복 방지)
-        # 같은 섹션에 여러 링크를 추가할 때 이미 있는 노드는 건너뜀
+        # Add nodes to the section (avoid duplicates)
+        # When several links are added to the same section, nodes already present are skipped
         first_node.add_section(section_name)
         if first_node_name not in section.node_list:
             section.add_node(first_node_name)
@@ -259,13 +259,13 @@ class Network:
         if second_node_name not in section.node_list:
             section.add_node(second_node_name)
 
-        # 커브 끝점 설정 (Java: CSection.AddNode의 커브 처리)
+        # Curve end-point flags (Java: curve handling in CSection.AddNode)
         if section_type == "CURVE":
-            if section.node_count == 2:  # 첫 번째로 추가된 노드
+            if section.node_count == 2:  # the first node added
                 first_node.backward_curve_end = True
             second_node.forward_curve_end = True
         else:
-            # LINE 타입: 각도 계산
+            # LINE type: compute the angle
             if section.node_count >= 2:
                 first = self.nodes[section.first_node]
                 angle = int(math.degrees(
@@ -277,7 +277,7 @@ class Network:
                     first.angle = angle
                 second_node.angle = angle
 
-        # 링크 생성
+        # Create the link
         distance = first_node.get_length(second_node)
         link = Link(
             from_node=first_node_name,
@@ -292,13 +292,13 @@ class Network:
         return link
 
     def add_eq_mapping(self, eq_name: str, node_name: str):
-        """설비 ↔ 노드 매핑 추가"""
+        """Add an equipment ↔ node mapping"""
         self.eq_to_node[eq_name] = node_name
         self.node_to_eq[node_name] = eq_name
 
     def get_neighbors(self, node_name: str) -> List[Tuple[str, float]]:
         """
-        특정 노드의 인접 노드와 이동 시간 반환.
+        Return the neighbouring nodes of a node together with the travel times.
         [(neighbor_name, move_in_time), ...]
         """
         node = self.nodes.get(node_name)
@@ -307,7 +307,7 @@ class Network:
         return [(name, time) for name, time in node.move_in_times.items()]
 
     def get_section_nodes(self, section_name: str) -> List[str]:
-        """섹션에 속한 노드 이름 리스트 반환"""
+        """Return the list of node names belonging to a section"""
         section = self.sections.get(section_name)
         if section is None:
             return []
@@ -315,8 +315,8 @@ class Network:
 
     def finalize(self):
         """
-        네트워크 구축 완료 후 해시 테이블 생성.
-        모든 add_node/add_link 호출 후에 한 번 호출.
+        Build the hash tables once network construction is complete.
+        Call once after all add_node/add_link calls.
         """
         for section in self.sections.values():
             section.make_hash_table()

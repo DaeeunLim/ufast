@@ -23,7 +23,7 @@ class DXFParser:
             print(f"Error reading file: {e}")
             return []
 
-        # Group code/value 쌍 리스트로 변환
+        # Convert to a list of group code/value pairs
         pairs = []
         i = 0
         while i < len(lines) - 1:
@@ -32,7 +32,7 @@ class DXFParser:
             pairs.append((code, value))
             i += 2
 
-        # 쌍 단위로 순회
+        # Iterate pair by pair
         idx = 0
         while idx < len(pairs):
             code, value = pairs[idx]
@@ -181,7 +181,7 @@ class DXFParser:
                     self._process_entity_data(block_entity, new_transform)
 
     def _process_arc(self, data: Dict[str, Any], layer: CLayer, transform=None):
-        """ARC 엔티티를 CQuadCurve 또는 CLine으로 변환 (Java 원본 패턴)"""
+        """Convert an ARC entity to CQuadCurve or CLine (pattern from the Java original)"""
         cx = data.get('x1', 0)
         cy = data.get('y1', 0)
         radius = data.get('radius', 0)
@@ -198,14 +198,14 @@ class DXFParser:
             ny = (x * sx) * math.sin(rad) + (y * sy) * math.cos(rad) + transform.get('y', 0)
             return nx, ny
 
-        # 호의 각도 범위 계산
+        # Compute the angular span of the arc
         if start_deg < end_deg:
             dtheta = end_deg - start_deg
         else:
             dtheta = end_deg + 360 - start_deg
 
         if dtheta <= 100:
-            # QuadCurve로 변환
+            # Convert to QuadCurve
             start_rad = math.radians(start_deg)
             end_rad = math.radians(end_deg)
 
@@ -214,16 +214,16 @@ class DXFParser:
             to_x = cx + radius * math.cos(end_rad)
             to_y = cy + radius * math.sin(end_rad)
 
-            # 제어점: 호의 중점에서 접선의 교점
+            # Control point: intersection of the tangents at the arc midpoint
             mid_angle = start_rad + math.radians(dtheta / 2)
-            # 호 중점의 실제 좌표
+            # Actual coordinates of the arc midpoint
             mid_x = cx + radius * math.cos(mid_angle)
             mid_y = cy + radius * math.sin(mid_angle)
 
-            # 제어점 = 접선 교차점 계산
-            # 시작점과 끝점의 접선이 만나는 점
-            # 간략화: 호 중점을 외부로 밀어내는 방식
-            # quadratic bezier에서 호를 근사하려면 ctrl = 2*mid - 0.5*(start + end)
+            # Control point = compute the tangent intersection
+            # The point where the tangents at the start and end meet
+            # Simplification: push the arc midpoint outward
+            # To approximate an arc with a quadratic bezier: ctrl = 2*mid - 0.5*(start + end)
             ctrl_x = 2 * mid_x - 0.5 * (from_x + to_x)
             ctrl_y = 2 * mid_y - 0.5 * (from_y + to_y)
 
@@ -240,7 +240,7 @@ class DXFParser:
             curve.angle = dtheta
             layer.shape_list.append(curve)
         else:
-            # 큰 호: 선분으로 분할 (10도 간격)
+            # Large arc: split into line segments (10-degree steps)
             num_segments = max(2, int(dtheta / 10))
             step = dtheta / num_segments
 
@@ -260,7 +260,7 @@ class DXFParser:
                     CLine(name="", type_str="LINE", x1=x1, y1=y1, x2=x2, y2=y2, color=None))
 
     def _process_circle(self, data: Dict[str, Any], layer: CLayer, transform=None):
-        """CIRCLE 엔티티를 선분으로 분할"""
+        """Split a CIRCLE entity into line segments"""
         cx = data.get('x1', 0)
         cy = data.get('y1', 0)
         radius = data.get('radius', 0)
@@ -275,7 +275,7 @@ class DXFParser:
             ny = (x * sx) * math.sin(rad) + (y * sy) * math.cos(rad) + transform.get('y', 0)
             return nx, ny
 
-        # 36개 선분으로 원 근사 (10도 간격)
+        # Approximate the circle with 36 segments (10-degree steps)
         num_segments = 36
         for i in range(num_segments):
             a1 = math.radians(i * 360 / num_segments)

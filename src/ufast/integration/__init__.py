@@ -1,11 +1,11 @@
 """
-Integration package: 물류(main_ui) + 생산(PySCFabSim) 통합 레이어.
+Integration package: layer that integrates AMHS (main_ui) + production (PySCFabSim).
 
-구성 요소
+Components
 ----------
-- timeline.py        : 두 모드 공통 스냅샷/타임라인 기록 + 재생(스크럽) 엔진
-- production_runner.py: PySCFabSim greedy 루프를 GUI 스레드에서 구동하는 어댑터
-- production_view.py  : 생산 모드 전용 대시보드 위젯
+- timeline.py        : snapshot/timeline recording + replay (scrubbing) engine shared by both modes
+- production_runner.py: adapter that drives the PySCFabSim greedy loop from a GUI thread
+- production_view.py  : dashboard widget dedicated to production mode
 """
 
 from .timeline import TimelineRecorder, Snapshot

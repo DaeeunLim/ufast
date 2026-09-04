@@ -1,25 +1,25 @@
 """
-logistics_logger.py - RouteManager 물류 로그 (CSV)
+logistics_logger.py - RouteManager logistics log (CSV)
 
-경로 탐색, OHT 배차, 차량 이동/상태 변화를 CSV 파일로 기록한다.
-시뮬레이션 완료 후 save()를 호출하면 3개의 CSV가 생성된다:
+Records route searches, OHT assignments, and vehicle moves/status changes to CSV files.
+Calling save() after the simulation completes produces three CSV files:
 
-  1. route_pathfind_{ts}.csv  - 경로 탐색 결과
-  2. route_dispatch_{ts}.csv - OHT 배차 결정
-  3. route_vehicle_{ts}.csv  - 차량 이동 및 상태 변화
+  1. route_pathfind_{ts}.csv  - route search results
+  2. route_dispatch_{ts}.csv - OHT assignment decisions
+  3. route_vehicle_{ts}.csv  - vehicle moves and status changes
 
-사용 패턴:
+Usage pattern:
     from ufast.route.logistics_logger import get_logistics_logger
 
     logger = get_logistics_logger()
     logger.reset()
 
-    # 각 모듈에서 자동 호출됨 (RouteManager, Dispatcher, VehicleTracker)
+    # Called automatically by each module (RouteManager, Dispatcher, VehicleTracker)
     logger.log_pathfind(...)
     logger.log_dispatch(...)
     logger.log_vehicle_move(...)
 
-    # 시뮬레이션 종료 시
+    # At the end of the simulation
     logger.save("logs")
 """
 
@@ -32,10 +32,10 @@ from typing import List, Optional, Dict, Any
 
 class LogisticsLogger:
     """
-    RouteManager 물류 로그 기록기.
+    RouteManager logistics log recorder.
 
-    3종류의 CSV 로그를 메모리에 누적한 뒤 save()로 일괄 저장한다.
-    DEBUG 레벨: 모든 세부 동작을 기록.
+    Accumulates three kinds of CSV logs in memory and writes them all at once with save().
+    DEBUG level: records every detailed action.
     """
 
     def __init__(self):
@@ -47,7 +47,7 @@ class LogisticsLogger:
         self._last_vehicle_key = None
 
     def reset(self):
-        """로그 초기화 (시뮬레이션 시작 시 호출)"""
+        """Clear the logs (call at simulation start)"""
         self._pathfind_rows.clear()
         self._dispatch_rows.clear()
         self._vehicle_rows.clear()
@@ -62,7 +62,7 @@ class LogisticsLogger:
     def enabled(self, value: bool):
         self._enabled = value
 
-    # ─── 경로 탐색 로그 ──────────────────────────────────────
+    # ─── Route search log ────────────────────────────────────
 
     def log_pathfind(
         self,
@@ -78,19 +78,19 @@ class LogisticsLogger:
         context: str = "GENERAL",
     ):
         """
-        경로 탐색 결과를 기록한다.
+        Record a route search result.
 
         Args:
-            sim_time: 시뮬레이션 시각 (초)
-            from_node: 출발 노드
-            to_node: 도착 노드
-            path: 탐색된 경로 (노드 리스트)
-            cost: 경로 비용 (이동 시간)
-            path_length: 경로 노드 수
-            is_fallback: 정적 경로 폴백 여부
-            static_path_length: 정적 경로 노드 수
-            detour_ratio: 우회 비율
-            context: 탐색 호출 컨텍스트 (예: DISPATCH_PROBE, SECTION_ROUTE)
+            sim_time: simulation time (seconds)
+            from_node: origin node
+            to_node: destination node
+            path: the path found (list of nodes)
+            cost: route cost (travel time)
+            path_length: number of nodes in the path
+            is_fallback: whether the static-route fallback was used
+            static_path_length: number of nodes in the static path
+            detour_ratio: detour ratio
+            context: context of the search call (e.g. DISPATCH_PROBE, SECTION_ROUTE)
         """
         if not self._enabled:
             return
@@ -119,7 +119,7 @@ class LogisticsLogger:
         path_length: int,
         cost: float,
     ):
-        """설비 간 경로 탐색 결과 (get_route_by_eq)"""
+        """Equipment-to-equipment route search result (get_route_by_eq)"""
         if not self._enabled:
             return
 
@@ -137,7 +137,7 @@ class LogisticsLogger:
             f"EQ: {from_eq} → {to_eq}",
         ])
 
-    # ─── 배차 로그 ───────────────────────────────────────────
+    # ─── Assignment log ──────────────────────────────────────
 
     def log_dispatch(
         self,
@@ -150,16 +150,16 @@ class LogisticsLogger:
         reason: str = "",
     ):
         """
-        OHT 배차 결정을 기록한다.
+        Record an OHT assignment decision.
 
         Args:
-            sim_time: 시뮬레이션 시각
-            target_section_id: 이송 요청 섹션 ID
-            selected_oht: 선택된 OHT 이름 (None이면 배차 실패)
-            strategy_name: 사용된 전략 이름
-            idle_count: IDLE OHT 수
-            total_count: 전체 OHT 수
-            reason: 선택 사유 (같은 섹션, 최근접, 폴백 등)
+            sim_time: simulation time
+            target_section_id: section ID of the transport request
+            selected_oht: name of the selected OHT (None means assignment failed)
+            strategy_name: name of the strategy used
+            idle_count: number of IDLE OHTs
+            total_count: total number of OHTs
+            reason: selection reason (same section, nearest, fallback, etc.)
         """
         if not self._enabled:
             return
@@ -180,7 +180,7 @@ class LogisticsLogger:
         self._last_dispatch_key = key
         self._dispatch_rows.append(row)
 
-    # ─── 차량 이동/상태 로그 ─────────────────────────────────
+    # ─── Vehicle move/status log ─────────────────────────────
 
     def log_vehicle_move(
         self,
@@ -192,15 +192,15 @@ class LogisticsLogger:
         blocked_by: Optional[str] = None,
     ):
         """
-        차량 이동을 기록한다.
+        Record a vehicle move.
 
         Args:
-            sim_time: 시뮬레이션 시각
-            vehicle_name: 차량 이름
-            from_node: 이전 노드
-            to_node: 다음 노드
-            success: 이동 성공 여부
-            blocked_by: 이동 실패 시 차단한 차량 이름
+            sim_time: simulation time
+            vehicle_name: vehicle name
+            from_node: previous node
+            to_node: next node
+            success: whether the move succeeded
+            blocked_by: name of the blocking vehicle if the move failed
         """
         if not self._enabled:
             return
@@ -234,7 +234,7 @@ class LogisticsLogger:
         path_length: int = 0,
     ):
         """
-        차량 상태 변화를 기록한다.
+        Record a vehicle status change.
         """
         if not self._enabled:
             return
@@ -263,7 +263,7 @@ class LogisticsLogger:
         vehicle_name: str,
         node: str = "",
     ):
-        """차량 등록을 기록한다."""
+        """Record a vehicle registration."""
         if not self._enabled:
             return
 
@@ -294,7 +294,7 @@ class LogisticsLogger:
         path_length: int,
         idle_elapsed: float = 0.0,
     ):
-        """차량 경로 할당을 기록한다."""
+        """Record a vehicle route assignment."""
         if not self._enabled:
             return
 
@@ -326,15 +326,15 @@ class LogisticsLogger:
         idle_elapsed: float = 0.0,
     ):
         """
-        Idle Repositioning 이동을 기록한다.
+        Record an idle repositioning move.
 
         Args:
-            sim_time: 시뮬레이션 시각
-            vehicle_name: 차량 이름
-            from_node: 현재 노드
-            to_node: 재배치 목적지 노드
-            path_length: 경로 길이
-            idle_elapsed: 재배치 직전까지의 연속 IDLE 시간 (초)
+            sim_time: simulation time
+            vehicle_name: vehicle name
+            from_node: current node
+            to_node: repositioning destination node
+            path_length: path length
+            idle_elapsed: continuous IDLE time right before repositioning (seconds)
         """
         if not self._enabled:
             return
@@ -362,7 +362,7 @@ class LogisticsLogger:
         sim_time: float,
         cycles: List[List[str]],
     ):
-        """데드락 감지를 기록한다."""
+        """Record a deadlock detection."""
         if not self._enabled:
             return
 
@@ -386,11 +386,11 @@ class LogisticsLogger:
         idle_stats: Dict[str, Dict[str, float]],
     ):
         """
-        시뮬레이션 종료 시점의 차량별 IDLE 시간 요약을 기록한다.
-        VehicleTracker.get_idle_stats() 결과를 그대로 전달하면 된다.
+        Record the per-vehicle IDLE time summary at the end of the simulation.
+        Pass the result of VehicleTracker.get_idle_stats() directly.
 
         Args:
-            sim_time: 현재 시뮬레이션 시각
+            sim_time: current simulation time
             idle_stats: {vehicle_name: {total_idle_time, current_idle_time,
                                         idle_count, idle_ratio}}
         """
@@ -413,33 +413,33 @@ class LogisticsLogger:
                 f"{stat['current_idle_time']:.2f}",
             ])
 
-    # ─── 통계 조회 ───────────────────────────────────────────
+    # ─── Statistics ──────────────────────────────────────────
 
     def get_stats(self) -> Dict[str, int]:
-        """누적 로그 건수"""
+        """Accumulated log row counts"""
         return {
             "pathfind_count": len(self._pathfind_rows),
             "dispatch_count": len(self._dispatch_rows),
             "vehicle_event_count": len(self._vehicle_rows),
         }
 
-    # ─── CSV 저장 ────────────────────────────────────────────
+    # ─── CSV output ──────────────────────────────────────────
 
     def save(self, output_dir: str) -> List[str]:
         """
-        로그를 CSV 파일로 저장한다.
+        Save the logs as CSV files.
 
         Args:
-            output_dir: 저장 디렉토리
+            output_dir: output directory
 
         Returns:
-            저장된 파일 경로 리스트
+            List of saved file paths
         """
         os.makedirs(output_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         saved: List[str] = []
 
-        # 1. 경로 탐색 로그 (행이 0건이어도 헤더 파일은 항상 생성)
+        # 1. Route search log (a header-only file is always written even with zero rows)
         path = os.path.join(output_dir, f"route_pathfind_{ts}.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -452,7 +452,7 @@ class LogisticsLogger:
                 writer.writerows(self._pathfind_rows)
         saved.append(path)
 
-        # 2. 배차 로그 (행이 0건이어도 헤더 파일은 항상 생성)
+        # 2. Assignment log (a header-only file is always written even with zero rows)
         path = os.path.join(output_dir, f"route_dispatch_{ts}.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -464,7 +464,7 @@ class LogisticsLogger:
                 writer.writerows(self._dispatch_rows)
         saved.append(path)
 
-        # 3. 차량 이동/상태 로그 (행이 0건이어도 헤더 파일은 항상 생성)
+        # 3. Vehicle move/status log (a header-only file is always written even with zero rows)
         path = os.path.join(output_dir, f"route_vehicle_{ts}.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -481,13 +481,13 @@ class LogisticsLogger:
         return saved
 
 
-# ── 싱글턴 ────────────────────────────────────────────────────
+# ── Singleton ─────────────────────────────────────────────────
 
 _instance: Optional[LogisticsLogger] = None
 
 
 def get_logistics_logger() -> LogisticsLogger:
-    """LogisticsLogger 싱글턴 반환"""
+    """Return the LogisticsLogger singleton"""
     global _instance
     if _instance is None:
         _instance = LogisticsLogger()

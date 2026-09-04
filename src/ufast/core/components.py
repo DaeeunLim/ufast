@@ -111,15 +111,15 @@ class EQ:
         self.top: float = 0.0
         self.is_loaded: bool = False
 
-        # EQ 상태 (시각화용)
-        # "IDLE"           : Lot 없음 (기본 회색)
-        # "WAITING"        : Lot이 port에 있고 OHT 아직 미배차 (주황)
-        # "OHT_COMING"     : OHT가 픽업하러 오는 중 (녹색)
-        # "PROCESS_WAITING": 새 Lot 도착 대기 / rundown 측정 시작 (하늘색)
-        # "PROCESSING"     : 새 Lot 도착 후 가공 시작 (녹색)
+        # EQ status (for visualization)
+        # "IDLE"           : no lot (default gray)
+        # "WAITING"        : lot at port, OHT not yet assigned (orange)
+        # "OHT_COMING"     : OHT on its way to pick up (green)
+        # "PROCESS_WAITING": waiting for a new lot to arrive / rundown measurement started (light blue)
+        # "PROCESSING"     : processing started after a new lot arrived (green)
         self.eq_status: str = "IDLE"
-        self.waiting_lot_count: int = 0  # source EQ 기준: port + internal 합산
-        self.inbound_lot_count: int = 0  # destination EQ 기준: 도착 예정 Lot 수
+        self.waiting_lot_count: int = 0  # for the source EQ: port + internal combined
+        self.inbound_lot_count: int = 0  # for the destination EQ: number of lots expected to arrive
         self.rundown_wait_lot_id: Optional[str] = None
         self.processing_lot_id: Optional[str] = None
 
@@ -131,40 +131,40 @@ class EQ:
             else:
                 self.internal_buffer.append(param)
             self.waiting_lot_count = (1 if self.port_buffer[0] else 0) + len(self.internal_buffer)
-            # OHT 미배차 상태면 WAITING
+            # WAITING if no OHT has been assigned yet
             if self.eq_status == "IDLE":
                 self.eq_status = "WAITING"
 
         elif msg == "OHT_ASSIGNED":
-            # OHT가 이 EQ로 향해 출발 (controllers에서 호출)
+            # An OHT has departed toward this EQ (called from controllers)
             self.eq_status = "OHT_COMING"
 
         elif msg == "LOT_TRANSPORTED":
-            # OHT가 도착해서 Lot을 가져감
+            # The OHT has arrived and taken the lot
             oht = vehicle_controller.oht_list.get(param)
             if oht and self.port_buffer[0]:
                 oht.loaded_lot_info = self.port_buffer[0]
                 self.port_buffer[0] = None
 
-                # 내부 버퍼에서 포트로 이동
+                # Move from the internal buffer to the port
                 if self.internal_buffer:
                     self.port_buffer[0] = self.internal_buffer.pop(0)
                     self.is_loaded = True
-                    self.eq_status = "WAITING"  # 다음 Lot 대기
+                    self.eq_status = "WAITING"  # waiting for the next lot
                 else:
                     self.is_loaded = False
                     self.eq_status = "IDLE"
             self.waiting_lot_count = (1 if self.port_buffer[0] else 0) + len(self.internal_buffer)
 
         elif msg == "LOT_INBOUND":
-            # 적재된 OHT가 이 EQ로 배달 중: 설비 기준 가공 대기 시작
+            # A loaded OHT is delivering to this EQ: equipment-side processing wait starts
             self.inbound_lot_count += 1
             lot_info = str(param) if param is not None else ""
             self.rundown_wait_lot_id = lot_info.split("@")[0] if lot_info else None
             self.eq_status = "PROCESS_WAITING"
 
         elif msg == "LOT_DELIVERED":
-            # 적재된 OHT가 이 EQ에 Lot을 전달 완료: 설비 기준 가공 시작
+            # A loaded OHT has delivered the lot to this EQ: equipment-side processing starts
             if self.inbound_lot_count > 0:
                 self.inbound_lot_count -= 1
             lot_info = str(param) if param is not None else ""
@@ -191,7 +191,7 @@ class Section:
         self.figures: List[Figure] = []  # Visualization figures
 
     def add_buffer(self, rail_length: float, initial_node: str, terminal_node: str):
-        # OHT Length = 1.0 (VehicleSpec) 가정
+        # Assumes OHT Length = 1.0 (VehicleSpec)
         capacity = int(rail_length / 1.0)
         if capacity == 0: capacity = 1
 
@@ -200,10 +200,10 @@ class Section:
 
     def merge_figures(self):
         """
-        Section 내 여러 CLine을 하나의 CLine으로 병합한다.
-        - 첫 figure의 시작점 → 마지막 figure의 끝점
-        - self.length는 변경하지 않음 (원래 경로 길이 유지)
-        - CQuadCurve가 포함된 Section은 병합하지 않음
+        Merge multiple CLines within the Section into a single CLine.
+        - start point of the first figure → end point of the last figure
+        - self.length is not changed (the original path length is preserved)
+        - Sections containing a CQuadCurve are not merged
         """
         from ufast.drawing.geometry import CLine, CQuadCurve
 

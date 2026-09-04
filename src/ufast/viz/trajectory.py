@@ -1,15 +1,15 @@
 """
-viz/trajectory.py — OHT 궤적 자료구조 + 위치 보간 + JSON 저장/로드.
+viz/trajectory.py — OHT trajectory data structures + position interpolation + JSON save/load.
 
-ufast/amhs.py 가 매 trip 완료 시 dict 로 trip 데이터를 누적해두고,
-시뮬레이션 종료 시 TrajectoryLog 로 묶어
-results/<run_id>/*_trajectories.json 으로 저장.
-viz/rerun_replay.py 가 그 파일을 읽어 시각 t 에서 OHT 위치를 보간한다.
+ufast/amhs.py accumulates trip data as dicts each time a trip completes; at the
+end of the simulation they are bundled into a TrajectoryLog and saved to
+results/<run_id>/*_trajectories.json.
+viz/rerun_replay.py reads that file and interpolates OHT positions at time t.
 
-보간 방식 (Phase 2 v1):
-  - 경로 따라 누적 거리 비율로 선형 보간.
-  - 운동학적 정확도(엣지별 시간) 대신 시각적 부드러움 우선.
-  - leg 단위 분할: empty leg(OHT→픽업) → loaded leg(픽업→배달).
+Interpolation method (Phase 2 v1):
+  - Linear interpolation along the path by cumulative-distance fraction.
+  - Visual smoothness is favoured over kinematic accuracy (per-edge times).
+  - Split per leg: empty leg (OHT -> pickup) -> loaded leg (pickup -> delivery).
 """
 from __future__ import annotations
 import json
@@ -17,25 +17,25 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# OHT 상태 라벨 (rerun 색상 키)
+# OHT state labels (rerun colour keys)
 STATE_IDLE    = 'IDLE'
-STATE_EMPTY   = 'EMPTY'    # OHT 가 픽업하러 가는 중 (빈 leg)
-STATE_LOADED  = 'LOADED'   # OHT 가 lot 을 싣고 가는 중 (적재 leg)
-STATE_AT_DEST = 'AT_DEST'  # 방금 배달 완료, 다음 작업 대기
+STATE_EMPTY   = 'EMPTY'    # OHT heading to pickup (empty leg)
+STATE_LOADED  = 'LOADED'   # OHT carrying a lot (loaded leg)
+STATE_AT_DEST = 'AT_DEST'  # just delivered, waiting for the next job
 
 
 @dataclass
 class Trip:
-    """OHT 한 회 이송 작업의 시각·경로 기록."""
+    """Timing and path record of one OHT transport job."""
     oht_id: str
-    request_time: float            # 발주 시각
-    assignment_time: float         # OHT 가 배정돼 출발한 시각
-    delivery_time: float           # 적재물 배달 완료 시각
-    empty_path: List[str]          # OHT 현재 노드 → 픽업 노드 (노드 이름 시퀀스)
-    loaded_path: List[str]         # 픽업 노드 → 배달 노드
-    empty_duration: float          # 빈 leg 소요 (혼잡 반영)
-    loaded_duration: float         # 적재 leg 소요 (혼잡 반영)
-    congestion: float              # 적용된 혼잡 계수
+    request_time: float            # time the request was issued
+    assignment_time: float         # time the OHT was assigned and departed
+    delivery_time: float           # time the load was delivered
+    empty_path: List[str]          # OHT current node -> pickup node (sequence of node names)
+    loaded_path: List[str]         # pickup node -> delivery node
+    empty_duration: float          # empty-leg duration (congestion applied)
+    loaded_duration: float         # loaded-leg duration (congestion applied)
+    congestion: float              # congestion factor applied
 
     @property
     def pickup_time(self) -> float:
@@ -48,18 +48,18 @@ class Trip:
 
 @dataclass
 class TrajectoryLog:
-    """한 ufast 실행의 전체 궤적 로그."""
+    """Complete trajectory log of one ufast run."""
     trips: List[Trip] = field(default_factory=list)
     oht_initial_positions: Dict[str, str] = field(default_factory=dict)
-    # production Machine 가동 기간 [{start, end, family}, ...] — 설비 활동 시각화용
+    # production Machine busy periods [{start, end, family}, ...] — for tool activity visualisation
     machine_activities: List[Dict[str, Any]] = field(default_factory=list)
-    # family → 총 machine 수 — 부하율 (active/total) 기반 색상 gradient 에 사용
+    # family -> total machine count — used for the load-ratio (active/total) colour gradient
     family_sizes: Dict[str, int] = field(default_factory=dict)
-    # F12 — KPI 시계열 snapshot tuple list:
+    # F12 — KPI time-series snapshot tuple list:
     #   [(sim_time, busy_count, section_inflight_sum, pending_queue,
     #     delivered_count, max_section_inflight), ...]
     kpi_snapshots: List[List[Any]] = field(default_factory=list)
-    # 시계열 부속 메타 — 정규화에 필요
+    # Time-series metadata — needed for normalisation
     oht_total: int = 0
 
     def save(self, path: str) -> None:
@@ -95,7 +95,7 @@ class TrajectoryLog:
                       kpi_snapshots: Optional[List[Any]] = None,
                       oht_total: int = 0,
                       ) -> 'TrajectoryLog':
-        """AMHS executor 가 누적한 raw dict 리스트 → TrajectoryLog."""
+        """Raw dict list accumulated by the AMHS executor -> TrajectoryLog."""
         trips = [Trip(**d) for d in trip_dicts]
         return cls(
             trips=trips,
@@ -107,12 +107,12 @@ class TrajectoryLog:
         )
 
 
-# ── 위치 보간 ───────────────────────────────────────────────
+# ── Position interpolation ──────────────────────────────────
 
 def _path_cumulative_distance(path: List[str],
                               nodes_xy: Dict[str, Tuple[float, float]]
                               ) -> Tuple[List[Tuple[float, float]], List[float]]:
-    """경로 노드 좌표 + 누적 거리 배열."""
+    """Path node coordinates + cumulative distance array."""
     pts = [nodes_xy[n] for n in path if n in nodes_xy]
     cum = [0.0]
     for i in range(1, len(pts)):
@@ -127,7 +127,7 @@ def _interpolate_along_path(path: List[str],
                             leg_duration: float,
                             nodes_xy: Dict[str, Tuple[float, float]]
                             ) -> Tuple[float, float]:
-    """leg_elapsed/leg_duration 비율로 경로 위 위치 선형 보간 (누적 거리 기준)."""
+    """Linear position interpolation along the path by the leg_elapsed/leg_duration fraction (cumulative distance)."""
     pts, cum = _path_cumulative_distance(path, nodes_xy)
     if not pts:
         return (0.0, 0.0)
@@ -137,7 +137,7 @@ def _interpolate_along_path(path: List[str],
     frac = max(0.0, min(1.0, leg_elapsed / leg_duration))
     target = frac * cum[-1]
 
-    # cum 에서 target 이 들어가는 구간 찾기
+    # find the segment of cum that contains target
     for i in range(1, len(cum)):
         if cum[i] >= target:
             seg_len = cum[i] - cum[i - 1]
@@ -152,16 +152,16 @@ def interpolate_trip_position(trip: Trip, t: float,
                               nodes_xy: Dict[str, Tuple[float, float]]
                               ) -> Optional[Tuple[float, float, str]]:
     """
-    Trip 의 시각 t 에서 OHT 위치와 상태.
+    OHT position and state of a Trip at time t.
 
     Returns:
-        (x, y, state) — t < assignment 면 None.
+        (x, y, state) — None if t < assignment.
         state ∈ {STATE_EMPTY, STATE_LOADED, STATE_AT_DEST}
     """
     if t < trip.assignment_time:
         return None
     if t >= trip.delivery_time:
-        # 배달 완료 — 마지막 노드(=loaded_path 끝)에서 대기
+        # Delivery complete — waiting at the last node (= end of loaded_path)
         if trip.loaded_path:
             last = trip.loaded_path[-1]
             if last in nodes_xy:
@@ -170,12 +170,12 @@ def interpolate_trip_position(trip: Trip, t: float,
 
     elapsed = t - trip.assignment_time
     if elapsed < trip.empty_duration:
-        # 빈 leg
+        # empty leg
         x, y = _interpolate_along_path(trip.empty_path, elapsed,
                                        trip.empty_duration, nodes_xy)
         return (x, y, STATE_EMPTY)
     else:
-        # 적재 leg
+        # loaded leg
         leg_elapsed = elapsed - trip.empty_duration
         x, y = _interpolate_along_path(trip.loaded_path, leg_elapsed,
                                        trip.loaded_duration, nodes_xy)

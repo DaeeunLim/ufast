@@ -1,53 +1,72 @@
-# src/Dataset — 데이터셋 및 레일 레이아웃
+# dataset/ — Datasets and rail layouts
 
-## 역할
+## Role
 
-시뮬레이션 입력 데이터 저장소. 생산 측은 SMT2020 계열 팹 데이터셋 3종(HVLM/LVHM/LVLM), 물류 측은 SMAT2022 AMHS 레이아웃 CSV와 이를 변환한 `.rail` 파일이 담당한다. legacy 물류 전용 실행에 쓰는 대용량 From-To 트레이스(`.dat`)와 변환 산출물도 함께 있다.
+Input data store for the simulation. On the production side there are three SMT2020-family fab
+datasets (HVLM/LVHM/LVLM); on the logistics side, the SMAT2022 AMHS layout CSVs and the `.rail` file
+converted from them. The large From-To trace (`.dat`) used by the legacy logistics-only runner and
+the conversion outputs are also kept here.
 
-## 생산 데이터셋 (SMT2020 계열)
+## Production datasets (SMT2020 family)
 
-| 폴더 | 특징 |
+| Folder | Characteristics |
 |---|---|
-| `HVLM/` | High-Volume/Low-Mix — 제품 수 적고 물량 많음. 기본 스모크·벤치마크 대상 (route 2종) |
-| `LVLM/` | Low-Volume/Low-Mix (route 4종) |
-| `LVHM/` | Low-Volume/High-Mix — 제품 믹스가 가장 복잡 (route 10종) |
+| `HVLM/` | High-Volume/Low-Mix — few products, high volume. Default smoke-test and benchmark target (2 routes) |
+| `LVLM/` | Low-Volume/Low-Mix (4 routes) |
+| `LVHM/` | Low-Volume/High-Mix — the most complex product mix (10 routes) |
 
-공통 파일 구성 (탭 구분 텍스트):
+Common file layout (tab-separated text):
 
-| 파일 | 내용 |
+| File | Content |
 |---|---|
-| `tool.txt.1l` | 설비(STNFAM/STN) 정의 — 디스패치 rule, load/unload, capacity, setup group |
-| `route_*.txt` | 공정 route — 스텝별 설비 family, 처리시간 분포, 배치, rework, CQT |
-| `part.txt` / `order.txt` / `WIP.txt` | 제품→route 매핑 / 릴리즈 계획 / 초기 WIP |
-| `downcal.txt` / `pmcal.txt` / `attach.txt` | 고장·PM 캘린더와 설비 그룹 부착 |
-| `setup.txt` / `setupgrp.txt` | setup 전환 행렬 / 그룹 정의 |
-| `fromto.txt` | 데이터셋 내장 정적 이송시간 분포 — AMHS 미사용 시 baseline |
+| `tool.txt.1l` | Tool (STNFAM/STN) definitions — dispatch rule, load/unload, capacity, setup group |
+| `route_*.txt` | Process routes — tool family per step, processing-time distribution, batching, rework, CQT |
+| `part.txt` / `order.txt` / `WIP.txt` | Product→route mapping / release plan / initial WIP |
+| `downcal.txt` / `pmcal.txt` / `attach.txt` | Breakdown and PM calendars and their attachment to tool groups |
+| `setup.txt` / `setupgrp.txt` | Setup change matrix / group definitions |
+| `fromto.txt` | Static transport-time distribution bundled with the dataset — baseline when the AMHS is not used |
 
-## 레일 레이아웃 (.rail)
+## Rail layouts (.rail)
 
-| 파일 | 역할 |
+| File | Role |
 |---|---|
-| `SMAT2022.rail` | **주력 레이아웃** — `smat2022_to_rail.convert()`가 SMAT2022 CSV에서 생성 (노드 2,858 / 링크 3,424 / 섹션 1,698) |
-| `case1.rail` | 원본 case1 소규모 레이아웃 (legacy 포맷) |
-| `case1_SMT2020_106_nospur.rail` | case1 기반 SMT2020 106설비 매핑 + spur 제거 |
+| `SMAT2022.rail` | **Primary layout** — generated from the SMAT2022 CSVs by `smat2022_to_rail.convert()` (2,858 nodes / 3,424 links / 1,698 sections) |
+| `case1.rail` | Original small case1 layout (legacy format) |
+| `case1_SMT2020_106_nospur.rail` | case1-based mapping of the 106 SMT2020 tools with spurs removed |
 
-## SMAT2022/ 원본 소스
+## SMAT2022/ original sources
 
-`Adress.csv`(노드 2,857) · `Rail.csv`(링크 3,423) · `Equipment.csv`(장비 1,115대) · `VehicleType.csv`(OHT 사양: Vmax 5000, accel 2000, decel 3500 mm/s) · `transport_times_between_tool_groups.csv`(사전 계산 tool-group 간 이송시간) · 계산 스크립트 3종(`add_lengths.py`, `calc_transport_times.py`, `calc_mean_transport_times_between_families.py`)
+`Adress.csv` (2,857 nodes) · `Rail.csv` (3,423 links) · `Equipment.csv` (1,115 tools) ·
+`VehicleType.csv` (OHT specification: Vmax 5000, accel 2000, decel 3500 mm/s) ·
+`transport_times_between_tool_groups.csv` (precomputed transport times between tool groups) ·
+three computation scripts (`add_lengths.py`, `calc_transport_times.py`,
+`calc_mean_transport_times_between_families.py`)
 
-## 기타
+## Other
 
-- `case1_Fromto.dat` (127만 행) — logistics-only 모드용 From-To 시간당 발생율(rate [건/시간]) 시계열 (`common/fromto_parser`가 읽음). 대형 팹 확장 예제(LVHM_E)는 용량 문제로 공개 저장소에 포함하지 않는다.
-- `SMAT2022_family_node_map.csv` — 변환 산출물: tool group 108개별 대표 레일 노드 매핑
+- `case1_Fromto.dat` (1.27M rows) — From-To hourly rate (rate [events/hour]) time series for the
+  logistics-only mode (read by `common/fromto_parser`). The large-fab extension example (LVHM_E) is
+  not included in the public repository because of its size.
+- `SMAT2022_family_node_map.csv` — conversion output: representative rail node for each of the 108
+  tool groups
 
-## 차량 제원 (`vehicle_spec.json`)
+## Vehicle specification (`vehicle_spec.json`)
 
-두 실행기(`ufast-run`, `ufast-fromto`)가 읽는 OHT 기본 제원. 단위 mm / mm/s / mm/s². 값은 `SMAT2022/VehicleType.csv` 의 OHTV0(길이 784, 최소 차간 125 → footprint 909 mm; Vmax 5000, accel 2000, decel 3500)에 직선/곡선 링크 제한속도(5000 / 1000 mm/s)를 더한 것이다. 실행 시 `--vehicle-spec PATH` 로 다른 파일을 주거나 `--oht-speed` 등 플래그로 개별 값을 덮어쓸 수 있고(플래그 우선), 실제 사용된 값은 결과 JSON `meta.vehicle` 에 남는다.
+Default OHT specification read by both runners (`ufast-run`, `ufast-fromto`). Units are mm / mm/s /
+mm/s². The values are OHTV0 from `SMAT2022/VehicleType.csv` (length 784, minimum headway 125 →
+footprint 909 mm; Vmax 5000, accel 2000, decel 3500) plus the straight/curve link speed limits
+(5000 / 1000 mm/s). At run time a different file can be given with `--vehicle-spec PATH`, or
+individual values can be overridden with flags such as `--oht-speed` (flags take precedence); the
+values actually used are recorded in the result JSON under `meta.vehicle`.
 
-## 사용 맥락
+## Usage context
 
 ```bash
-cd src && python ufast/run.py Dataset/HVLM Dataset/SMAT2022.rail --days 365 --oht 100
+ufast-run dataset/HVLM dataset/SMAT2022.rail --days 365 --oht 100
 ```
 
-`scripts/compare_baselines.py`의 기본 데이터셋 목록이 HVLM/LVHM/LVLM 3종이며, `tests/test_cosim_smoke.py`와 `scripts/verify_fast_route.py`도 이 폴더를 입력으로 쓴다. SMT2020/SMAT2022는 외부 공개 데이터셋이므로, 코드 공개 시 원본 재배포 대신 "원본 다운로드 → 변환기 실행" 안내가 안전하다.
+The default dataset list of `scripts/compare_baselines.py` is the three sets HVLM/LVHM/LVLM, and
+`tests/test_cosim_smoke.py` and `scripts/verify_fast_route.py` also use this folder as input.
+SMT2020/SMAT2022 are externally published datasets, so when releasing the code it is safer to
+provide "download the original → run the converter" instructions instead of redistributing the
+originals.

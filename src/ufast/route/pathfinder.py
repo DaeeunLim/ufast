@@ -1,8 +1,8 @@
 """
-pathfinder.py - Dijkstra 경로 탐색
+pathfinder.py - Dijkstra route search
 
-Java RouteManager의 PathSearch, CostSearch를 포팅.
-heapq 기반 우선순위 큐로 O(log n) 삽입 (Java의 O(n) 대비 개선).
+Ports PathSearch and CostSearch from the Java RouteManager.
+Uses a heapq-based priority queue for O(log n) insertion (an improvement over Java's O(n)).
 """
 
 from __future__ import annotations
@@ -14,15 +14,15 @@ from .graph import Network, Node, NetworkSection
 
 class PathFinder:
     """
-    Dijkstra 기반 경로 탐색기.
+    Dijkstra-based route finder.
 
-    Java RouteManager의 PathSearch/CostSearch를 포팅하되,
-    heapq를 사용하여 성능을 개선한다.
+    Ports PathSearch/CostSearch from the Java RouteManager,
+    with heapq for better performance.
 
-    우회 제한 기능 (A+B 방식):
-      A) max_detour_ratio: 동적 경로가 정적 최단 경로 대비 이 비율을 넘으면
-         penalty를 무시한 정적 경로로 폴백한다.
-      B) penalty_weight / penalty_cap: traffic_penalty의 영향을 제한한다.
+    Detour limiting (A+B approach):
+      A) max_detour_ratio: if the dynamic route exceeds this ratio relative to the
+         static shortest route, fall back to the static route that ignores penalties.
+      B) penalty_weight / penalty_cap: bound the influence of traffic_penalty.
          effective_penalty = 1 + weight * min(raw_penalty - 1, cap)
 
     Usage:
@@ -30,53 +30,53 @@ class PathFinder:
         finder.initialize(line_speed=2.6667, curve_speed=0.8)
         path, cost = finder.path_search("node_1", "node_100")
 
-        # 우회 제한 설정
-        finder.penalty_weight = 0.5   # penalty 영향 50%로 감쇠
-        finder.penalty_cap = 3.0      # penalty 최대 3.0배까지만
-        finder.max_detour_ratio = 1.5  # 정적 경로 대비 1.5배까지만 허용
+        # Detour limit settings
+        finder.penalty_weight = 0.5   # damp the penalty influence to 50%
+        finder.penalty_cap = 3.0      # cap the penalty at 3.0x
+        finder.max_detour_ratio = 1.5  # allow up to 1.5x the static route
     """
 
     MAX_COST = 1e15
 
     def __init__(self, network: Network):
         self.network = network
-        self.line_speed: float = 2.6667   # m/s (Java 기본값)
+        self.line_speed: float = 2.6667   # m/s (Java default)
         self.curve_speed: float = 0.8     # m/s
         self.vehicle_length: float = 1.0
         self.vehicle_width: float = 1.0
 
-        # ─── 우회 제한 파라미터 (B: Bounded Penalty) ───
+        # ─── Detour limit parameters (B: Bounded Penalty) ───
         # effective_penalty = 1 + penalty_weight * min(raw_penalty - 1, penalty_cap)
-        # raw_penalty=1.0(기본)이면 effective=1.0 (영향 없음)
-        self.penalty_weight: float = 1.0  # 0.0~1.0, penalty 영향 비율
-        self.penalty_cap: float = 5.0     # penalty 상한값 (raw_penalty - 1 기준)
+        # raw_penalty=1.0 (default) gives effective=1.0 (no effect)
+        self.penalty_weight: float = 1.0  # 0.0~1.0, penalty influence ratio
+        self.penalty_cap: float = 5.0     # penalty upper bound (in terms of raw_penalty - 1)
 
-        # ─── 우회 제한 파라미터 (A: Max Detour Ratio) ───
-        self.max_detour_ratio: float = 0.0  # 0이면 비활성. 1.5 = 정적 경로의 1.5배까지 허용
+        # ─── Detour limit parameters (A: Max Detour Ratio) ───
+        self.max_detour_ratio: float = 0.0  # 0 disables. 1.5 = allow up to 1.5x the static route
 
-        # ─── 정적 경로 캐시 ───
+        # ─── Static route cache ───
         # {(from_node, to_node): (path, cost)}
         self._static_cache: Dict[Tuple[str, str], Tuple[List[str], float]] = {}
 
-        # ─── 동적 경로 캐시 (penalty 반영, TTL 기반) ───
+        # ─── Dynamic route cache (penalty-aware, TTL based) ───
         # {(from_node, to_node): (sim_time_cached, path, cost)}
-        # TTL 내에 동일 쌍의 경로 재요청 시 Dijkstra를 건너뛴다.
+        # If the same pair is requested again within the TTL, Dijkstra is skipped.
         self._dynamic_cache: Dict[Tuple[str, str], Tuple[float, List[str], float]] = {}
         self._dynamic_cache_ttl: float = 3.0    # sim-seconds
-        self._dynamic_cache_max: int = 4096     # 메모리 상한 (항목 수)
-        self._sim_time: float = 0.0             # route_manager가 동기화
+        self._dynamic_cache_max: int = 4096     # memory limit (number of entries)
+        self._sim_time: float = 0.0             # synchronized by route_manager
 
-        # ─── 우회 제한 통계 ───
+        # ─── Detour limit statistics ───
         self.detour_fallback_count: int = 0
         self.total_search_count: int = 0
         self.cache_hit_count: int = 0
 
-        # 외부 routing cost function. None이면 기존 비용식 그대로 사용한다.
+        # External routing cost function. None means the default cost formula is used.
         self.custom_cost_function = None
 
-        # ─── scipy C 다익스트라 엔진 (fast_pathfinder) ───
-        # 최초 cost_search 호출 시 lazy 구축. scipy 미설치나
-        # UFAST_FAST_ROUTE=0 환경변수 시 순정 파이썬 경로 사용.
+        # ─── scipy C Dijkstra engine (fast_pathfinder) ───
+        # Built lazily on the first cost_search call. Falls back to the pure-Python
+        # path when scipy is missing or the UFAST_FAST_ROUTE=0 environment variable is set.
         self._fast_engine = None
         self._fast_engine_disabled = False
 
@@ -88,21 +88,21 @@ class PathFinder:
         vehicle_width: float = 1.0,
     ):
         """
-        네트워크 초기화: 노드 간 이동 시간 계산.
+        Initialize the network: compute travel times between nodes.
         Java: RouteManager.Initialize()
 
-        각 섹션의 인접 노드 쌍에 대해 move_in_time = distance / speed 계산.
-        LINE 섹션은 line_speed, CURVE 섹션은 curve_speed 사용.
+        For each adjacent node pair in every section, move_in_time = distance / speed.
+        LINE sections use line_speed, CURVE sections use curve_speed.
         """
         self.line_speed = line_speed
         self.curve_speed = curve_speed
         self.vehicle_length = vehicle_length
         self.vehicle_width = vehicle_width
 
-        # 속도/이동시간이 바뀌므로 C 엔진은 다음 쿼리에서 재구축
+        # Speeds/travel times change, so the C engine is rebuilt on the next query
         self._fast_engine = None
 
-        # 섹션별 노드 쌍에 대해 이동 시간 계산
+        # Compute travel times for the node pairs of each section
         for section in self.network.sections.values():
             section.make_hash_table()
 
@@ -113,7 +113,7 @@ class PathFinder:
             if speed <= 0:
                 continue
 
-            # 섹션 내 연속 노드 쌍
+            # Consecutive node pairs within the section
             for j in range(1, section.node_count):
                 prev_name = section.get_node(j - 1)
                 curr_name = section.get_node(j)
@@ -128,13 +128,13 @@ class PathFinder:
                 distance = prev_node.get_length(curr_node)
                 move_in_time = distance / speed
 
-                # 정방향: prev → curr
+                # Forward: prev → curr
                 curr_node.set_move_in_time(move_in_time, prev_name, forward=True)
-                # 역방향: curr → prev
+                # Backward: curr → prev
                 prev_node.set_move_in_time(move_in_time, curr_name, forward=False)
 
     def _get_fast_engine(self):
-        """C 다익스트라 엔진 반환. 사용 불가 조건이면 None (순정 경로 사용)."""
+        """Return the C Dijkstra engine, or None if it cannot be used (pure-Python path)."""
         if self.custom_cost_function is not None or self._fast_engine_disabled:
             return None
         if self._fast_engine is None:
@@ -146,13 +146,13 @@ class PathFinder:
                 from .fast_pathfinder import FastCostEngine
                 self._fast_engine = FastCostEngine(self)
             except ImportError:
-                print("[FastRoute] scipy 미설치 → 순정 파이썬 cost_search 사용")
+                print("[FastRoute] scipy not installed → using pure-Python cost_search")
                 self._fast_engine_disabled = True
                 return None
         return self._fast_engine
 
     def notify_penalty_changed(self, node_names) -> None:
-        """traffic_penalty 변경 통지 (bridge 훅). 엔진 가중치 무효화."""
+        """traffic_penalty change notification (bridge hook). Invalidates engine weights."""
         if self._fast_engine is not None:
             self._fast_engine.mark_dirty(node_names)
 
@@ -162,15 +162,15 @@ class PathFinder:
 
     def _effective_penalty(self, raw_penalty: float) -> float:
         """
-        Bounded penalty 계산 (방안 B).
+        Bounded penalty computation (approach B).
 
-        raw_penalty가 1.0(기본)이면 결과도 1.0.
-        raw_penalty가 높을수록 비용이 올라가지만, cap과 weight로 제한된다.
+        If raw_penalty is 1.0 (default), the result is also 1.0.
+        A higher raw_penalty raises the cost, but is bounded by cap and weight.
 
-        공식: 1 + weight * min(raw - 1, cap)
-        예) raw=4.0, weight=0.5, cap=3.0 → 1 + 0.5 * min(3.0, 3.0) = 2.5
-        예) raw=10.0, weight=0.5, cap=3.0 → 1 + 0.5 * min(9.0, 3.0) = 2.5 (capped)
-        예) raw=1.0 → 1.0 (no penalty)
+        Formula: 1 + weight * min(raw - 1, cap)
+        e.g. raw=4.0, weight=0.5, cap=3.0 → 1 + 0.5 * min(3.0, 3.0) = 2.5
+        e.g. raw=10.0, weight=0.5, cap=3.0 → 1 + 0.5 * min(9.0, 3.0) = 2.5 (capped)
+        e.g. raw=1.0 → 1.0 (no penalty)
         """
         if raw_penalty <= 1.0:
             return 1.0
@@ -179,21 +179,21 @@ class PathFinder:
         return 1.0 + self.penalty_weight * bounded
 
     def clear_static_cache(self):
-        """정적 경로 캐시 초기화. 네트워크 구조 변경 시 호출."""
+        """Clear the static route cache. Call when the network structure changes."""
         self._static_cache.clear()
-        self._dynamic_cache.clear()   # 정적 캐시 초기화 시 동적 캐시도 함께 비운다
+        self._dynamic_cache.clear()   # clearing the static cache also clears the dynamic cache
 
     def clear_dynamic_cache(self):
-        """동적 경로 캐시만 초기화. 네트워크 penalty 대폭 변경 시 호출."""
+        """Clear only the dynamic route cache. Call after large network penalty changes."""
         self._dynamic_cache.clear()
 
     def set_custom_cost_function(self, cost_function):
-        """외부 routing cost function을 주입한다. None이면 기존 비용식으로 복귀한다."""
+        """Inject an external routing cost function. None reverts to the default cost formula."""
         self.custom_cost_function = cost_function
         self.clear_static_cache()
 
     def _calculate_edge_cost(self, move_time: float, raw_penalty: float, section: NetworkSection, from_node: Node, to_node: Node, context: str = "") -> float:
-        """엣지 비용 계산. 커스텀 함수가 없으면 기존 move_time * effective_penalty를 그대로 사용."""
+        """Compute the edge cost. Without a custom function, use move_time * effective_penalty as before."""
         default_cost = move_time * self._effective_penalty(raw_penalty)
         fn = self.custom_cost_function
         if fn is None:
@@ -231,10 +231,10 @@ class PathFinder:
                 last_error = e
                 continue
             except Exception as e:
-                print(f"[RoutingCost] ⚠️ 커스텀 cost function 오류 → 기본 비용 사용: {e}")
+                print(f"[RoutingCost] ⚠️ custom cost function error → using default cost: {e}")
                 return default_cost
         if last_error is not None:
-            print(f"[RoutingCost] ⚠️ 커스텀 cost function 시그니처 불일치 → 기본 비용 사용: {last_error}")
+            print(f"[RoutingCost] ⚠️ custom cost function signature mismatch → using default cost: {last_error}")
         return default_cost
 
     def path_search_static(
@@ -243,20 +243,20 @@ class PathFinder:
         to_node_name: str,
     ) -> Tuple[List[str], float]:
         """
-        정적 최단 경로 탐색 (penalty 무시).
+        Static shortest-route search (ignores penalties).
 
-        traffic_penalty를 무시하고 순수 이동 시간만으로 경로를 찾는다.
-        결과를 캐시하여 동일 쌍에 대해 재계산하지 않는다.
-        detour ratio 비교의 기준선으로 사용된다 (방안 A).
+        Finds the route using pure travel time only, ignoring traffic_penalty.
+        The result is cached so the same pair is not recomputed.
+        Serves as the baseline for the detour ratio comparison (approach A).
         """
         cache_key = (from_node_name, to_node_name)
         if cache_key in self._static_cache:
             return self._static_cache[cache_key]
 
-        # penalty 파라미터를 임시로 비활성화하고 탐색
+        # Temporarily disable the penalty parameters and search
         saved_weight = self.penalty_weight
         saved_cap = self.penalty_cap
-        self.penalty_weight = 0.0  # penalty 완전 무시 → effective=1.0
+        self.penalty_weight = 0.0  # ignore penalties entirely → effective=1.0
 
         path, cost = self._dijkstra(from_node_name, to_node_name)
 
@@ -267,7 +267,7 @@ class PathFinder:
         return path, cost
 
     def _reset_search(self):
-        """모든 노드의 Dijkstra 상태 초기화. Java: ResetRouteSearch()"""
+        """Reset the Dijkstra state of every node. Java: ResetRouteSearch()"""
         for node in self.network.nodes.values():
             node.reset_search(self.MAX_COST)
 
@@ -277,24 +277,24 @@ class PathFinder:
         to_node_name: str,
     ) -> Tuple[List[str], float]:
         """
-        1:1 최단 경로 탐색 (우회 제한 적용).
+        1:1 shortest-route search (with detour limiting).
 
-        동작 흐름:
-          1. Bounded penalty(B)가 적용된 동적 경로를 탐색한다.
-          2. max_detour_ratio(A)가 설정되어 있으면:
-             - 정적 최단 경로(penalty 무시)를 구한다 (캐시 활용).
-             - 동적 경로의 노드 수가 정적 경로의 ratio배를 넘으면
-               정적 경로로 폴백한다.
+        Flow:
+          1. Search the dynamic route with bounded penalty (B) applied.
+          2. If max_detour_ratio (A) is set:
+             - Obtain the static shortest route (penalties ignored), using the cache.
+             - If the dynamic route's node count exceeds ratio times the static route's,
+               fall back to the static route.
 
         Returns:
-            (경로 노드 이름 리스트, 총 이동 시간)
-            경로를 찾지 못하면 ([], -1.0)
+            (list of node names on the route, total travel time)
+            ([], -1.0) if no route is found
         """
         self.total_search_count += 1
 
-        # ── 동적 캐시 조회 ──────────────────────────────────
-        # 동일한 (from, to) 쌍을 TTL 이내에 재요청하면 Dijkstra를 건너뛴다.
-        # penalty가 자주 바뀌어도 TTL 내에는 이전 결과를 재활용해 CPU 절감.
+        # ── Dynamic cache lookup ────────────────────────────
+        # If the same (from, to) pair is requested again within the TTL, skip Dijkstra.
+        # Even if penalties change often, reusing the previous result within the TTL saves CPU.
         _cache_key = (from_node_name, to_node_name)
         _cached = self._dynamic_cache.get(_cache_key)
         if _cached is not None:
@@ -303,35 +303,35 @@ class PathFinder:
                 self.cache_hit_count += 1
                 return _cp, _cc
 
-        # 동적 경로 탐색 (bounded penalty 적용)
+        # Dynamic route search (bounded penalty applied)
         dynamic_path, dynamic_cost = self._dijkstra(from_node_name, to_node_name)
 
         if not dynamic_path:
             return [], -1.0
 
-        # 방안 A: detour ratio 검사
+        # Approach A: detour ratio check
         if self.max_detour_ratio > 0:
             static_path, static_cost = self.path_search_static(
                 from_node_name, to_node_name,
             )
 
             if static_path and len(static_path) > 1:
-                # 노드 수 기준으로 우회 비율 판단
+                # Judge the detour ratio by node count
                 ratio = len(dynamic_path) / len(static_path)
 
                 if ratio > self.max_detour_ratio:
-                    # 과도한 우회 → 정적 경로로 폴백
+                    # Excessive detour → fall back to the static route
                     self.detour_fallback_count += 1
                     dynamic_path, dynamic_cost = static_path, static_cost
 
-        # ── 동적 캐시 저장 ──────────────────────────────────
+        # ── Store in the dynamic cache ──────────────────────
         if len(self._dynamic_cache) >= self._dynamic_cache_max:
-            # 간단한 크기 제한: 가장 오래된 항목 1/4 제거
+            # Simple size limit: evict the stale entries
             cutoff = self._sim_time - self._dynamic_cache_ttl
             stale = [k for k, v in self._dynamic_cache.items() if v[0] <= cutoff]
             for k in stale:
                 del self._dynamic_cache[k]
-            # 그래도 크면 전체 비우기
+            # If still too large, clear everything
             if len(self._dynamic_cache) >= self._dynamic_cache_max:
                 self._dynamic_cache.clear()
         self._dynamic_cache[_cache_key] = (self._sim_time, dynamic_path, dynamic_cost)
@@ -344,10 +344,10 @@ class PathFinder:
         to_node_name: str,
     ) -> Tuple[List[str], float]:
         """
-        핵심 Dijkstra 알고리즘.
+        Core Dijkstra algorithm.
         Java: RouteManager.PathSearch()
 
-        bounded penalty(_effective_penalty)가 적용된 비용으로 탐색한다.
+        Searches with costs that include the bounded penalty (_effective_penalty).
         """
         from_node = self.network.nodes.get(from_node_name)
         to_node = self.network.nodes.get(to_node_name)
@@ -355,7 +355,7 @@ class PathFinder:
         if from_node is None or to_node is None:
             return [], -1.0
 
-        # 동일 노드
+        # Same node
         if from_node_name == to_node_name:
             return [from_node_name], 0.0
 
@@ -374,16 +374,16 @@ class PathFinder:
             curr_time, curr_name = heapq.heappop(heap)
             curr_node = self.network.nodes[curr_name]
 
-            # 이미 더 좋은 경로가 갱신됨
+            # A better route has already been recorded
             if curr_time > curr_node.arrived_time:
                 continue
 
-            # 도착 확인
+            # Arrival check
             if curr_name == to_node_name:
                 arrived = True
                 break
 
-            # 현재 노드가 속한 모든 섹션 탐색
+            # Explore every section the current node belongs to
             for section_name in curr_node.section_list:
                 section = self.network.sections.get(section_name)
                 if section is None:
@@ -393,13 +393,13 @@ class PathFinder:
                 if pos < 0:
                     continue
 
-                # 정방향 탐색 (pos+1, pos+2, ...)
+                # Forward exploration (pos+1, pos+2, ...)
                 self._explore_direction(
                     section, pos, 1, curr_node, heap,
                     from_node_name, to_node_name,
                 )
 
-                # 양방향 섹션이면 역방향도 탐색
+                # For two-way sections also explore backward
                 if section.two_way:
                     self._explore_direction(
                         section, pos, -1, curr_node, heap,
@@ -409,7 +409,7 @@ class PathFinder:
         if not arrived:
             return [], -1.0
 
-        # 경로 역추적
+        # Trace the route back
         path = []
         node_name = to_node_name
         while node_name is not None:
@@ -430,14 +430,15 @@ class PathFinder:
         to_node_name: str,
     ):
         """
-        섹션 내 한 방향으로 인접 노드 탐색.
-        Java PathSearch의 내부 for 루프를 포팅.
+        Explore neighbouring nodes in one direction within a section.
+        Ports the inner for loop of Java PathSearch.
         """
         d_time = search_node.arrived_time
 
-        # ── perf(#2): inner-loop 지역화 — node_count property / get_node 메서드
-        # 호출(각 수억 회)을 리스트 직접 인덱싱으로, prev_node 재조회를
-        # carry-forward 로, speed 계산을 루프 밖으로. 결과 동일(순수 리팩터).
+        # ── perf(#2): inner-loop localization — replace the node_count property /
+        # get_node method calls (hundreds of millions each) with direct list indexing,
+        # carry prev_node forward instead of re-fetching it, and hoist the speed
+        # computation out of the loop. Identical results (pure refactor).
         node_list = section.node_list
         n = len(node_list)
         gnodes = self.network.nodes
@@ -457,18 +458,18 @@ class PathFinder:
             if next_node is None:
                 break
 
-            # 출발 노드로 되돌아가는 것 방지 (Java: if(Node == FromNode) break)
+            # Prevent returning to the origin node (Java: if(Node == FromNode) break)
             if next_name == from_node_name:
                 break
 
-            # 이동 시간 계산
+            # Compute the travel time
             move_time = prev_node.move_in_times.get(next_name)
             if move_time is None:
-                # move_in_time이 설정되지 않은 경우 거리 기반 계산
+                # If move_in_time was not set, compute from distance
                 distance = prev_node.get_length(next_node)
                 move_time = distance / speed if speed > 0 else self.MAX_COST
 
-            # traffic penalty 반영 (bounded) 또는 커스텀 routing cost function 적용
+            # Apply the traffic penalty (bounded) or the custom routing cost function
             edge_cost = self._calculate_edge_cost(
                 move_time, next_node.traffic_penalty, section, prev_node, next_node, context="path_search"
             )
@@ -480,20 +481,19 @@ class PathFinder:
                 prev_node = next_node  # carry-forward (was gnodes.get(prev_name))
 
                 # NOTE:
-                # 기존 구현은 섹션 끝 노드만 heap에 넣었기 때문에,
-                # section 중간의 junction / branching node에서 다른 섹션으로
-                # 확장하지 못하고 reachable 경로도 FAIL이 나는 문제가 있었다.
+                # The former implementation pushed only the section end node onto the heap,
+                # so it could not expand into other sections from a junction / branching
+                # node in the middle of a section, and reachable routes came back as FAIL.
                 #
-                # Dijkstra 정합성을 우선하여 "갱신된 모든 노드"를 heap에 넣는다.
-                # stale entry는 상위 루프의
+                # For Dijkstra correctness, every updated node is pushed onto the heap.
+                # Stale entries are filtered naturally by the outer loop's
                 #   if curr_time > curr_node.arrived_time: continue
-                # 로 자연스럽게 걸러진다.
                 push(heap, (new_time, next_name))
 
                 if next_name == to_node_name:
                     return
             else:
-                break  # 더 좋은 경로가 이미 존재
+                break  # a better route already exists
 
             j += direction
 
@@ -504,16 +504,16 @@ class PathFinder:
         context: str = "cost_search",
     ) -> Dict[str, Tuple[float, float, List[str]]]:
         """
-        1:N Dijkstra - 한 출발 노드에서 여러 도착 노드까지의 비용 계산.
+        1:N Dijkstra - compute the costs from one origin node to several destination nodes.
         Java: RouteManager.CostSearch()
 
         Args:
-            from_node_name: 출발 노드 이름
-            to_node_names: 도착 노드 이름 리스트
+            from_node_name: origin node name
+            to_node_names: list of destination node names
 
         Returns:
-            {to_node_name: (time, distance, path)} 딕셔너리.
-            도달 불가능한 노드는 (MAX_COST, MAX_COST, []) 반환.
+            {to_node_name: (time, distance, path)} dictionary.
+            Unreachable nodes return (MAX_COST, MAX_COST, []).
         """
         engine = self._get_fast_engine()
         if engine is not None:
@@ -523,7 +523,7 @@ class PathFinder:
         if from_node is None:
             return {}
 
-        # 찾아야 할 노드 집합
+        # Set of nodes still to be found
         remaining = set()
         for name in to_node_names:
             if name != from_node_name and name in self.network.nodes:
@@ -543,10 +543,10 @@ class PathFinder:
             if curr_time > curr_node.arrived_time:
                 continue
 
-            # 도착 노드 발견
+            # Destination node found
             remaining.discard(curr_name)
 
-            # 모든 인접 섹션 탐색
+            # Explore all adjacent sections
             for section_name in curr_node.section_list:
                 section = self.network.sections.get(section_name)
                 if section is None:
@@ -556,18 +556,18 @@ class PathFinder:
                 if pos < 0:
                     continue
 
-                # 정방향
+                # Forward
                 self._cost_explore_direction(
                     section, pos, 1, curr_node, heap, remaining, context,
                 )
 
-                # 양방향이면 역방향도
+                # Backward as well for two-way sections
                 if section.two_way:
                     self._cost_explore_direction(
                         section, pos, -1, curr_node, heap, remaining, context,
                     )
 
-        # 결과 수집
+        # Collect results
         results: Dict[str, Tuple[float, float, List[str]]] = {}
         for name in to_node_names:
             if name == from_node_name:
@@ -579,7 +579,7 @@ class PathFinder:
                 results[name] = (self.MAX_COST, self.MAX_COST, [])
                 continue
 
-            # 경로 역추적
+            # Trace the route back
             path = []
             trace_name = name
             while trace_name is not None:
@@ -602,9 +602,9 @@ class PathFinder:
         context: str = "cost_search",
     ):
         """
-        CostSearch용 방향 탐색.
-        PathSearch와 유사하지만 도착 노드가 여러 개이고
-        거리(length)도 함께 추적한다.
+        Directional exploration for CostSearch.
+        Similar to PathSearch, but there are several destination nodes
+        and the distance (length) is tracked as well.
         """
         d_time = search_node.arrived_time
         d_length = search_node.arrived_length
@@ -622,7 +622,7 @@ class PathFinder:
             if next_node is None or prev_node is None:
                 break
 
-            # 이동 시간 및 거리 계산
+            # Compute travel time and distance
             move_time = prev_node.move_in_times.get(next_name)
             distance = prev_node.get_length(next_node)
 
@@ -643,10 +643,10 @@ class PathFinder:
                 d_length = new_length
                 prev_name = next_name
 
-                # Dijkstra 정합성: target 의 최단거리는 heap pop 시점에만 확정된다.
-                # 발견(relaxation) 시점에 remaining.discard / early-return 하면
-                # 비최적(더 긴) 경로로 종료될 수 있다 → 상위 cost_search 루프에서
-                # pop 시 discard(curr_name) 하는 것만 신뢰한다.
+                # Dijkstra correctness: a target's shortest distance is final only when it is
+                # popped from the heap. Doing remaining.discard / early-return at discovery
+                # (relaxation) time could terminate on a non-optimal (longer) route → only
+                # the discard(curr_name) at pop time in the outer cost_search loop is trusted.
                 heapq.heappush(heap, (new_time, next_name))
             else:
                 break
@@ -658,19 +658,19 @@ class PathFinder:
         eq_names: Optional[List[str]] = None,
     ) -> Dict[str, Tuple[float, float]]:
         """
-        설비 간 비용 테이블 생성.
+        Build the equipment-to-equipment cost table.
         Java: Rail.makeFromToCostTable()
 
         Args:
-            eq_names: 설비 이름 리스트. None이면 모든 매핑된 설비.
+            eq_names: list of equipment names. None means every mapped equipment.
 
         Returns:
-            {"from_node_to_node": (time, distance)} 딕셔너리
+            {"from_node_to_node": (time, distance)} dictionary
         """
         if eq_names is None:
             eq_names = list(self.network.eq_to_node.keys())
 
-        # 설비 → 노드 변환
+        # Equipment → node conversion
         eq_node_pairs = []
         for eq in eq_names:
             node_name = self.network.eq_to_node.get(eq)

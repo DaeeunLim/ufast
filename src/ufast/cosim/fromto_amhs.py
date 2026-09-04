@@ -1,10 +1,11 @@
 """
-ufast/fromto_amhs.py — fromto.dat → AMHSExecutor 스케줄러.
+ufast/fromto_amhs.py — fromto.dat → AMHSExecutor scheduler.
 
-VehicleController 없이 AMHSExecutor 만으로 fromto-driven 시뮬레이션을 실행한다.
-생산 레이어가 없으므로 HeapInstance (경량 shim) 로 이벤트 큐를 구동.
+Runs a fromto-driven simulation with AMHSExecutor alone, without VehicleController.
+Since there is no production layer, HeapInstance (a lightweight shim) drives the
+event queue.
 
-공개 API:
+Public API:
     setup_fromto_amhs(rm, bridge, kin, fromto_data, num_oht, sim_duration, ...)
         → (amhs: AMHSExecutor, heap: HeapInstance)
 """
@@ -17,7 +18,7 @@ from ufast.common.fromto_parser import generate_fixed_interval_events
 
 
 class _FromtoRequestEvent:
-    """HeapInstance에 등록되는 FromTo 운반 요청 이벤트."""
+    """FromTo transport request event registered on the HeapInstance."""
     def __init__(self, timestamp: float, from_node: str, to_node: str, job_id: str, amhs: AMHSExecutor):
         self.timestamp = timestamp
         self.from_node = from_node
@@ -53,13 +54,13 @@ def setup_fromto_amhs(
     line_speed_mm_s: float = 5000.0,
     curve_speed_mm_s: float = 1000.0,
 ) -> Tuple[AMHSExecutor, HeapInstance]:
-    """fromto 시뮬레이션을 위한 AMHSExecutor + HeapInstance 를 초기화한다.
+    """Initialise an AMHSExecutor + HeapInstance for a fromto simulation.
 
-    fromto_data: [(from_eq, to_eq, rate), ...] 형식 (rate: 건/시간).
-    반환값으로 받은 heap 을 구동하면 시뮬레이션이 진행된다.
+    fromto_data: [(from_eq, to_eq, rate), ...] (rate: jobs per hour).
+    Driving the returned heap advances the simulation.
 
-    실시간 구동: RealTimeSimDriver(amhs_mode=True) 에 (amhs, heap) 전달.
-    헤드리스 구동: heap.pop_until(sim_duration) 을 while 루프로 반복.
+    Real-time driving: pass (amhs, heap) to RealTimeSimDriver(amhs_mode=True).
+    Headless driving: call heap.pop_until(sim_duration) in a while loop.
     """
     import random
     random.seed(seed)
@@ -82,10 +83,10 @@ def setup_fromto_amhs(
         line_speed_mm_s=line_speed_mm_s,
         curve_speed_mm_s=curve_speed_mm_s,
     )
-    amhs.instance = heap   # HeapInstance 를 UFastInstance 대신 주입
+    amhs.instance = heap   # inject HeapInstance in place of UFastInstance
     amhs.schedule_first_reposition(0.0)
 
-    # ── fromto 이벤트 스케줄 ──────────────────────────────
+    # ── Schedule fromto events ───────────────────────────
     _schedule_all(fromto_data, eq_to_node, amhs, heap, sim_duration, job_counter=[0])
 
     return amhs, heap
@@ -99,7 +100,7 @@ def _schedule_all(
     sim_duration: float,
     job_counter: list,
 ):
-    """fromto_data 의 각 레코드를 기반으로 고정 간격(3600/rate 초) 이벤트를 heap에 스케줄."""
+    """Schedule fixed-interval (3600/rate s) events on the heap for each fromto_data record."""
     valid_fromto = []
     for from_eq, to_eq, rate in fromto_data:
         from_node = eq_to_node.get(from_eq)

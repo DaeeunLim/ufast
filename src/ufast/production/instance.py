@@ -121,10 +121,10 @@ class Instance:
 
     def _lot_ready_for_step(self, lot, old_step):
         """
-        Hook: lot이 다음 step(lot.actual_step)을 받을 준비가 되었을 때 호출.
-        기본 구현은 즉시 dispatchable. ufast 서브클래스가 이 지점에
-        생산 step 사이의 물류 이송(OHT 운반)을 끼워넣는다.
-        old_step 이 None 이면 릴리스 직후의 첫 step.
+        Hook: called when the lot is ready to receive its next step (lot.actual_step).
+        The default implementation makes it dispatchable immediately. The ufast
+        subclass inserts the AMHS transport (OHT delivery) between production
+        steps at this point. old_step is None for the first step right after release.
         """
         self.dm.free_up_lots(self, lot)
 
@@ -150,7 +150,7 @@ class Instance:
                 lot.cqt_deadline = None
         # compute times for lot and machine
         lot_time, machine_time, setup_time = self.get_times(self.setups, lots, machine)
-        # 가동 구간 기록 — PM 가산 전의 machine_time 기준 (PM 은 downtime 으로 별도).
+        # Record the busy interval — based on machine_time before PM is added (PM is counted separately as downtime).
         busy_start = self.current_time + setup_time
         if setup_time > 0:
             machine.setup_intervals.append((self.current_time, busy_start))

@@ -1,14 +1,14 @@
 """
-커스텀 Idle Positioning 전략 예시.
+Custom idle positioning strategy example.
 
-반환 규칙:
-- plan_reposition(oht, current_time, current_node, route_manager, bridge, event_handler, vehicle_controller)를 정의한다.
-- 반환값은 다음 중 하나다.
+Return rules:
+- Define plan_reposition(oht, current_time, current_node, route_manager, bridge, event_handler, vehicle_controller).
+- The return value is one of the following.
   1) target section id: 123
-  2) target node: "N_..." 또는 route_manager node 문자열
+  2) target node: "N_..." or a route_manager node string
   3) section path: [123, 124, 125]
-  4) dict: {"target_section_id": 123} 또는 {"path": [123, 124]}
-- None을 반환하면 기존 기본 Idle Positioning으로 fallback된다.
+  4) dict: {"target_section_id": 123} or {"path": [123, 124]}
+- Returning None falls back to the built-in default idle positioning.
 """
 
 
@@ -45,5 +45,5 @@ class IdlePositioningStrategy:
         if not candidates:
             return None
 
-        # 혼잡도가 가장 낮은 다음 section으로 1-hop 이동
+        # Move 1 hop to the least congested next section
         return min(candidates, key=lambda sid: bridge.get_section_congestion(sid))

@@ -49,8 +49,8 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertEqual(result["avg_starvation_s"], 30.0)
 
     def test_starvation_transport_attribution_uses_binding_lot_transit_window(self):
-        # 굶주림 [120, 160), 닫아준 lot 은 130 에 이송 발주 → 160 에 배달.
-        # 이송 창과의 겹침 30s 가 transport-blocked, 나머지 10s 는 upstream.
+        # Starvation [120, 160); the lot that closed it was ordered for transport at 130 -> delivered at 160.
+        # The 30s overlap with the transit window is transport-blocked, the remaining 10s is upstream.
         lot = SimpleNamespace(
             free_since=160.0, last_transit_start=130.0, last_transit_end=160.0)
         open_starvation(self.machine, 120.0)
@@ -66,8 +66,8 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertEqual(result["transport_blocked_starvation_count"], 1)
 
     def test_starvation_transport_attribution_picks_last_ready_lot_in_batch(self):
-        # 배치 dispatch 는 가장 늦게 준비된 lot 이 시점을 결정 — 그 lot 의
-        # 이송 창(150~160)만 귀속되고, 먼저 온 lot(125 배달)은 무시된다.
+        # For batch dispatch the last-ready lot determines the time — only that lot's
+        # transit window (150~160) is attributed; the earlier lot (delivered at 125) is ignored.
         early = SimpleNamespace(
             free_since=125.0, last_transit_start=110.0, last_transit_end=125.0)
         late = SimpleNamespace(
@@ -81,7 +81,7 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertEqual(result["transport_blocked_starvation_s"], 10.0)
 
     def test_starvation_without_transit_window_counts_as_upstream(self):
-        # 이송이 없었던 lot(창 미설정) — 전부 upstream, 하위호환(2-tuple)도 동일.
+        # Lot without transport (no window set) — all upstream; the backward-compatible 2-tuple behaves the same.
         lot = SimpleNamespace(
             free_since=160.0, last_transit_start=None, last_transit_end=None)
         open_starvation(self.machine, 120.0)
@@ -96,7 +96,7 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertEqual(result["upstream_starvation_s"], 50.0)
 
     def test_utilization_time_budget_decomposition(self):
-        # 창 200s: busy 50 + setup 10 + starvation 40 (transport 30) + 기타 idle 100.
+        # 200s window: busy 50 + setup 10 + starvation 40 (transport 30) + other idle 100.
         self.instance.measurement_start_time = 0.0
         self.machine.utilized_time = 50.0
         self.machine.setuped_time = 10.0
@@ -114,7 +114,7 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertEqual(result["idle_other_s"], 100.0)
 
     def test_utilization_budget_is_none_with_warmup_window(self):
-        # 구간 기록이 없는 레거시 실행 + measurement_start > 0 → 미계산.
+        # Legacy run without interval records + measurement_start > 0 -> not computed.
         self.machine.utilized_time = 50.0
         self.instance.current_time = 200.0
 
@@ -124,11 +124,11 @@ class EquipmentKpiTests(unittest.TestCase):
         self.assertIsNone(result["idle_other_s"])
 
     def test_utilization_budget_from_intervals_with_warmup_window(self):
-        # busy/setup 구간이 있으면 warm-up 측정창(100~200)에서도 clipping 계산.
-        # busy [80,140) → 창 내 40, setup [140,150) → 10, 나머지 idle 50.
+        # With busy/setup intervals, clipping is computed even in the warm-up measurement window (100~200).
+        # busy [80,140) -> 40 inside the window, setup [140,150) -> 10, remaining idle 50.
         self.machine.busy_intervals = [(80.0, 140.0)]
         self.machine.setup_intervals = [(140.0, 150.0)]
-        self.machine.utilized_time = 999.0  # 스칼라는 무시되어야 함
+        self.machine.utilized_time = 999.0  # the scalar must be ignored
         self.instance.current_time = 200.0
 
         result = collect_equipment_kpis(self.instance)

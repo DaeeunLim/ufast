@@ -1,10 +1,10 @@
 """
-Rail 파일 읽기/쓰기 모듈
-Java 원본의 탭 구분 텍스트 형식과 호환
+Rail file read/write module
+Compatible with the tab-separated text format of the Java original
 
-파일 파싱은 common/rail_format.py(공통 파서)가 담당하고,
-이 모듈은 그 결과(RailData)를 시각화용 CLayer와
-SimulatorDataSet의 Section/EQ 구조로 변환한다.
+File parsing is handled by common/rail_format.py (the common parser);
+this module converts its result (RailData) into CLayer for visualization
+and into the Section/EQ structures of SimulatorDataSet.
 """
 from typing import Dict, List, Tuple
 from ufast.drawing.geometry import CLayer, CLine, CQuadCurve, CText
@@ -15,16 +15,16 @@ from ufast.common.rail_format import parse_rail_file
 
 def load_rail_file(filepath: str) -> List[CLayer]:
     """
-    .rail 파일을 읽어 CLayer 리스트(시각화용)를 반환한다.
-    동시에 SimulatorDataSet에 Section/EQ/연결 정보를 직접 구축한다.
+    Read a .rail file and return a list of CLayers (for visualization).
+    At the same time, build Section/EQ/link information directly in SimulatorDataSet.
     """
     ds = SimulatorDataSet.get_instance()
     ds.sections.clear()
     ds.section_id_to_index.clear()
     ds.eq_list.clear()
 
-    # ── 1단계: 공통 파서로 파일 파싱 ──────────────────────
-    # require_header=False: 과거 GUI가 헤더 없이 저장한 .rail도 열 수 있게 관대하게.
+    # ── Step 1: parse the file with the common parser ──────────────────────
+    # require_header=False: lenient so .rail files saved by the old GUI without a header still open.
     data = parse_rail_file(filepath, require_header=False)
 
     nodes: Dict[int, Tuple[float, float]] = {
@@ -46,14 +46,14 @@ def load_rail_file(filepath: str) -> List[CLayer]:
     texts: List[Tuple[str, float, float]] = [
         (t.name, t.x, t.y) for t in data.texts
     ]
-    # CURVE 섹션의 제어점 정보: sec_id → (x1,y1,cx,cy,x2,y2,center_x,center_y,angle)
+    # Control-point info for CURVE sections: sec_id → (x1,y1,cx,cy,x2,y2,center_x,center_y,angle)
     curve_figures: Dict[int, tuple] = {
         int(c.name): (c.x1, c.y1, c.cx, c.cy, c.x2, c.y2,
                       c.center_x, c.center_y, c.angle)
         for c in data.curves
     }
 
-    # 시각화 레이어 구성
+    # Build visualization layers
     vis_layer = CLayer(layer_name="Rail", is_rail_layer=True, is_turned_on=True)
     for t in data.texts:
         vis_layer.shape_list.append(
@@ -73,16 +73,16 @@ def load_rail_file(filepath: str) -> List[CLayer]:
         curve.angle = c.angle
         vis_layer.shape_list.append(curve)
 
-    # ── 2단계: node → 어떤 섹션의 from/to인지 매핑 ────────
-    # RAILLIST 기준: from_node가 섹션의 시작, to_node가 끝
-    node_to_section: Dict[int, int] = {}   # node_id → sec_id (to_node 기준)
-    from_node_to_section: Dict[int, int] = {}  # node_id → sec_id (from_node 기준)
+    # ── Step 2: map node → which section's from/to ────────
+    # Per RAILLIST: from_node is the section start, to_node the end
+    node_to_section: Dict[int, int] = {}   # node_id → sec_id (by to_node)
+    from_node_to_section: Dict[int, int] = {}  # node_id → sec_id (by from_node)
 
     for r in rail_list:
         node_to_section[r['to_node']] = r['sec_id']
         from_node_to_section[r['from_node']] = r['sec_id']
 
-    # ── 3단계: Section 객체 생성 ───────────────────────────
+    # ── Step 3: create Section objects ───────────────────────────
     for r in rail_list:
         sec_id = r['sec_id']
         length = r['length']
@@ -93,7 +93,7 @@ def load_rail_file(filepath: str) -> List[CLayer]:
         section.length = length
         section.add_buffer(length, f"N_{r['from_node']}", f"N_{r['to_node']}")
 
-        # 시각화 figure: CURVE면 CQuadCurve, LINE이면 CLine
+        # Visualization figure: CQuadCurve for CURVE, CLine for LINE
         fn = nodes.get(r['from_node'])
         tn = nodes.get(r['to_node'])
         if fn and tn:
@@ -113,8 +113,8 @@ def load_rail_file(filepath: str) -> List[CLayer]:
         ds.sections.append(section)
         ds.section_id_to_index[sec_id] = len(ds.sections) - 1
 
-    # ── 4단계: 섹션 연결 (next_sections / prev_sections) ───
-    # 섹션 A의 to_node == 섹션 B의 from_node → A→B
+    # ── Step 4: link sections (next_sections / prev_sections) ───
+    # Section A's to_node == section B's from_node → A→B
     to_node_of: Dict[int, int] = {}    # sec_id → to_node
     from_node_of: Dict[int, int] = {}  # sec_id → from_node
 
@@ -122,7 +122,7 @@ def load_rail_file(filepath: str) -> List[CLayer]:
         to_node_of[r['sec_id']] = r['to_node']
         from_node_of[r['sec_id']] = r['from_node']
 
-    # from_node 값 → 해당 섹션 id 역매핑
+    # Reverse map: from_node value → section id
     from_node_sec_map: Dict[int, List[int]] = {}  # from_node → [sec_id, ...]
     for r in rail_list:
         fn = r['from_node']
@@ -135,7 +135,7 @@ def load_rail_file(filepath: str) -> List[CLayer]:
         to_nd = to_node_of.get(sid)
         if to_nd is None:
             continue
-        # 이 섹션의 to_node를 from_node로 가진 다른 섹션들이 next
+        # Other sections whose from_node equals this section's to_node are next
         next_secs = from_node_sec_map.get(to_nd, [])
         for next_sid in next_secs:
             if next_sid != sid:
@@ -144,23 +144,23 @@ def load_rail_file(filepath: str) -> List[CLayer]:
                 if next_idx is not None:
                     ds.sections[next_idx].prev_sections.append(sid)
 
-    # ── 5단계: EQ 생성 및 섹션 연결 ──────────────────────
+    # ── Step 5: create EQs and link them to sections ──────────────────────
     # EQTONODEMAP: eq_name → node_id
-    # node_id가 어느 섹션의 to_node 또는 from_node인지 찾아 연결
+    # Find which section has node_id as to_node or from_node and link it
     for eq_name, node_id in eq_to_node.items():
         eq = EQ(eq_name)
 
-        # TEXT에서 좌표 찾기
+        # Look up coordinates from TEXT
         for (tname, tx, ty) in texts:
             if tname == eq_name:
                 eq.left = tx
                 eq.top = ty
                 break
 
-        # node_id가 속한 섹션 찾기 (to_node 우선, 없으면 from_node)
+        # Find the section containing node_id (to_node first, else from_node)
         sec_id = node_to_section.get(node_id)
         if sec_id is None:
-            # from_node로도 확인
+            # Also check by from_node
             for r in rail_list:
                 if r['from_node'] == node_id:
                     sec_id = r['sec_id']
@@ -183,8 +183,8 @@ def load_rail_file(filepath: str) -> List[CLayer]:
 
 def save_rail_file(filepath: str, layers: List[CLayer]):
     """
-    Rail 레이어의 도형들을 .rail 파일로 저장한다.
-    (DXF → Rail 변환 결과 저장용 - 기존 형식 유지)
+    Save the shapes of the Rail layer to a .rail file.
+    (For saving DXF → Rail conversion results - keeps the existing format)
     """
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write('RAILDATA\n')
@@ -210,7 +210,7 @@ def save_rail_file(filepath: str, layers: List[CLayer]):
                         '128', '128', '128'
                     ]) + '\n')
 
-        # SCALE 레코드
+        # SCALE record
         min_x, min_y = float('inf'), float('inf')
         max_x, max_y = float('-inf'), float('-inf')
         for layer in layers:

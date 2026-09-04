@@ -7,15 +7,15 @@ from ufast.drawing.geometry import CLayer
 
 
 class LayerPanel(QDockWidget):
-    """레이어 on/off 및 Rail 지정 패널 (DockWidget)"""
-    layer_changed = pyqtSignal()  # on/off 또는 rail 변경 시 발신
-    convert_to_rail = pyqtSignal()  # Rail 변환 버튼 클릭 시 발신
+    """Panel for toggling layers on/off and marking rail layers (DockWidget)"""
+    layer_changed = pyqtSignal()  # emitted when on/off or the rail flag changes
+    convert_to_rail = pyqtSignal()  # emitted when the Convert to Rail button is clicked
 
     def __init__(self, parent=None):
         super().__init__("Layers", parent)
         self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.layers: List[CLayer] = []
-        self._updating = False  # 프로그래밍적 변경 시 시그널 차단 플래그
+        self._updating = False  # flag to block signals during programmatic changes
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -39,13 +39,13 @@ class LayerPanel(QDockWidget):
         self.setMinimumWidth(200)
 
     def set_layers(self, layers: List[CLayer]):
-        """레이어 목록을 받아 테이블을 갱신한다."""
+        """Refresh the table from the given list of layers."""
         self._updating = True
         self.layers = layers
         self.table.setRowCount(len(layers))
 
         for i, layer in enumerate(layers):
-            # Name (읽기 전용)
+            # Name (read-only)
             name_item = QTableWidgetItem(layer.layer_name)
             name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(i, 0, name_item)

@@ -1,43 +1,44 @@
 """
-ufast/legacy_trajectory.py — Fromto-driven 시뮬레이션 trajectory 기록기.
+ufast/legacy_trajectory.py — trajectory recorder for fromto-driven simulation.
 
-legacy controllers.py 의 OHT 상태 전환(IDLE→ASSIGNED→LOADED→IDLE)을 관찰해
-production 모드와 동일한 TrajectoryLog (Trip 시퀀스) 로 변환한다.
-rerun_replay 가 두 모드를 동일하게 재생할 수 있게 된다.
+Observes the OHT state transitions (IDLE→ASSIGNED→LOADED→IDLE) of the legacy
+controllers.py and converts them into the same TrajectoryLog (Trip sequence) as
+production mode, so that rerun_replay can replay both modes identically.
 
-설계:
-  - 이벤트 루프 사이에 recorder.observe(t) 를 호출 — 각 OHT 의 상태 전환을 감지.
-  - 상태 머신:
-      IDLE → ASSIGNED  : trip 시작 (assignment_time, empty_path 초기 노드)
-      section 변경      : 진행 중인 leg 의 path 에 노드 append
-      ASSIGNED → LOADED : pickup (pickup_time = empty_duration 종료)
-      LOADED → IDLE/REPO: 배달 완료 → Trip 확정 후 trips 에 추가
-  - 노드 위치 = bridge.section_exit_node[current_section_id] (없으면 entry_node).
-  - REPOSITIONING 트립은 무시 (lot 운반 아님).
+Design:
+  - recorder.observe(t) is called between event-loop iterations — detects each
+    OHT's state transitions.
+  - State machine:
+      IDLE → ASSIGNED   : trip start (assignment_time, initial node of empty_path)
+      section change    : append node to the path of the leg in progress
+      ASSIGNED → LOADED : pickup (pickup_time = end of empty_duration)
+      LOADED → IDLE/REPO: delivery complete → Trip finalised and appended to trips
+  - Node position = bridge.section_exit_node[current_section_id] (else entry_node).
+  - REPOSITIONING trips are ignored (not lot transports).
 """
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
 class LegacyTrajectoryRecorder:
-    """controllers.py VehicleController 의 OHT 상태를 polling 으로 관찰."""
+    """Observes the OHT states of the controllers.py VehicleController by polling."""
 
     def __init__(self, vehicle_controller, bridge):
         self.vc = vehicle_controller
         self.bridge = bridge
 
-        # 이전 관측 상태 (oht_id → (status, current_section_id, destination_eq, loaded_lot_info))
+        # previously observed state (oht_id → (status, current_section_id, destination_eq, loaded_lot_info))
         self._prev: Dict[str, tuple] = {}
-        # 진행 중인 trip (oht_id → 부분 dict)
+        # trips in progress (oht_id → partial dict)
         self._active_trip: Dict[str, Dict[str, Any]] = {}
-        # 완료 trip
+        # completed trips
         self.trips: List[Dict[str, Any]] = []
-        # OHT 초기 위치 (oht_id → node)
+        # initial OHT positions (oht_id → node)
         self.initial_positions: Dict[str, str] = {}
 
-    # ── 헬퍼 ────────────────────────────────────────────
+    # ── Helpers ─────────────────────────────────────────
     def _oht_node(self, oht) -> Optional[str]:
-        """OHT 의 representative 노드 — section exit_node (fallback: entry_node)."""
+        """Representative node of an OHT — section exit_node (fallback: entry_node)."""
         sec_id = oht.current_section_id
         if sec_id is None or sec_id < 0:
             return None
@@ -50,17 +51,17 @@ class LegacyTrajectoryRecorder:
         return (oht.status, oht.current_section_id,
                 oht.destination_eq, oht.loaded_lot_info)
 
-    # ── 초기 스냅샷 ─────────────────────────────────────
+    # ── Initial snapshot ────────────────────────────────
     def snapshot_initial(self):
-        """vc.init() 직후 호출 — OHT 초기 노드 위치 + 상태 기록."""
+        """Call right after vc.init() — records the initial OHT node positions and states."""
         for name, oht in self.vc.oht_list.items():
             node = self._oht_node(oht)
             self.initial_positions[name] = node or ""
             self._prev[name] = self._key(oht)
 
-    # ── 매 이벤트 후 관찰 ───────────────────────────────
+    # ── Observation after each event ────────────────────
     def observe(self, t: float):
-        """이벤트 처리 후 OHT 상태 전환을 감지해 trip 데이터를 갱신."""
+        """Detect OHT state transitions after event processing and update the trip data."""
         for name, oht in self.vc.oht_list.items():
             prev = self._prev.get(name)
             curr = self._key(oht)
@@ -70,8 +71,8 @@ class LegacyTrajectoryRecorder:
             prev_status, prev_sec, _, _ = prev or (None, None, None, None)
             curr_status, curr_sec, _, _ = curr
 
-            # ── 1) (IDLE / REPOSITIONING) → ASSIGNED : trip 시작 ──
-            # REPOSITIONING→ASSIGNED 는 assign_oht 의 interrupt_reposition 경로.
+            # ── 1) (IDLE / REPOSITIONING) → ASSIGNED : trip start ──
+            # REPOSITIONING→ASSIGNED is the interrupt_reposition path of assign_oht.
             if prev_status in ("IDLE", "REPOSITIONING") and curr_status == "ASSIGNED":
                 start_node = self._oht_node(oht)
                 self._active_trip[name] = {
@@ -83,7 +84,7 @@ class LegacyTrajectoryRecorder:
                     'pickup_time': None,
                 }
 
-            # ── 2) ASSIGNED → LOADED : pickup 완료 ──
+            # ── 2) ASSIGNED → LOADED : pickup complete ──
             elif prev_status == "ASSIGNED" and curr_status == "LOADED":
                 trip = self._active_trip.get(name)
                 if trip is not None:
@@ -91,12 +92,12 @@ class LegacyTrajectoryRecorder:
                     trip['empty_duration'] = t - trip['assignment_time']
                     pickup_node = self._oht_node(oht)
                     if pickup_node:
-                        # empty_path 마지막에 pickup 지점 보장
+                        # ensure the pickup point is the last entry of empty_path
                         if not trip['empty_path'] or trip['empty_path'][-1] != pickup_node:
                             trip['empty_path'].append(pickup_node)
                         trip['loaded_path'] = [pickup_node]
 
-            # ── 3) LOADED → IDLE/REPOSITIONING : 배달 완료 ──
+            # ── 3) LOADED → IDLE/REPOSITIONING : delivery complete ──
             elif prev_status == "LOADED" and curr_status in ("IDLE", "REPOSITIONING"):
                 trip = self._active_trip.pop(name, None)
                 if trip and trip.get('pickup_time') is not None:
@@ -106,8 +107,8 @@ class LegacyTrajectoryRecorder:
                         trip['loaded_path'].append(delivery_node)
                     trip['delivery_time'] = t
                     trip['loaded_duration'] = t - trip['pickup_time']
-                    trip['congestion'] = 1.0  # legacy 는 별도 congestion 측정 없음
-                    # Trip dataclass 와 동일한 필드만 보관
+                    trip['congestion'] = 1.0  # legacy has no separate congestion measurement
+                    # keep only the fields of the Trip dataclass
                     self.trips.append({
                         'oht_id': trip['oht_id'],
                         'request_time': trip['request_time'],
@@ -120,7 +121,7 @@ class LegacyTrajectoryRecorder:
                         'congestion': 1.0,
                     })
 
-            # ── 4) section 변경 (진행 중 leg 에 노드 append) ──
+            # ── 4) section change (append node to the leg in progress) ──
             elif prev_sec != curr_sec and curr_sec is not None and curr_sec >= 0:
                 trip = self._active_trip.get(name)
                 if trip is not None:
@@ -133,19 +134,19 @@ class LegacyTrajectoryRecorder:
                             if not trip['loaded_path'] or trip['loaded_path'][-1] != node:
                                 trip['loaded_path'].append(node)
 
-            # ── 5) ASSIGNED → IDLE (pickup 실패) — 진행 trip 폐기 ──
+            # ── 5) ASSIGNED → IDLE (pickup failed) — discard the trip in progress ──
             elif prev_status == "ASSIGNED" and curr_status == "IDLE":
                 self._active_trip.pop(name, None)
 
             self._prev[name] = curr
 
-    # ── TrajectoryLog 빌드 ──────────────────────────────
+    # ── Build TrajectoryLog ─────────────────────────────
     def build_log_data(self) -> Dict[str, Any]:
-        """저장용 dict (TrajectoryLog.save 와 동일 키 구조)."""
+        """Dict for saving (same key structure as TrajectoryLog.save)."""
         return {
             'trips': self.trips,
             'oht_initial_positions': self.initial_positions,
-            # fromto 모드는 production 머신 활동 없음 — 빈 리스트/딕셔너리
+            # fromto mode has no production machine activity — empty list/dict
             'machine_activities': [],
             'family_sizes': {},
         }

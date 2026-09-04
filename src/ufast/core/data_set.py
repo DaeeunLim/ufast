@@ -6,18 +6,18 @@ import time
 @dataclass(order=True)
 class Event:
     """
-    시뮬레이션 이벤트 클래스
-    heapq에서 시간순으로 정렬하기 위해 order=True 사용
+    Simulation event class
+    Uses order=True so heapq sorts by time
     """
     time_scheduled: float
-    priority: int = field(compare=False, default=0) # 동시간대 우선순위 필요시 사용
+    priority: int = field(compare=False, default=0) # used when a priority among same-time events is needed
     event_type: str = field(compare=False, default="")
     from_node: str = field(compare=False, default="")
     to_node: str = field(compare=False, default="")
     oht_id: str = field(compare=False, default=None)
     time_enter_section: float = field(compare=False, default=0.0)
     
-    # Java의 clone 대응
+    # Counterpart of Java's clone
     def clone(self):
         return Event(
             time_scheduled=self.time_scheduled,
@@ -31,7 +31,7 @@ class Event:
 
 class SimulatorDataSet:
     """
-    Singleton 패턴을 활용한 전역 데이터 저장소
+    Global data store using the Singleton pattern
     """
     _instance = None
 
@@ -79,8 +79,8 @@ class SimulatorDataSet:
 
     def add_event(self, evt: Event, section=None):
         """
-        이벤트를 스케줄러에 등록합니다.
-        section이 None이면 전역 이벤트(FAB Event), 아니면 섹션 내부 이벤트로 처리
+        Register an event with the scheduler.
+        If section is None it is a global event (FAB Event); otherwise a section-internal event
         """
         if section is None:
             heapq.heappush(self.event_queue, evt)
@@ -89,9 +89,9 @@ class SimulatorDataSet:
             section.section_event_list.sort(key=lambda x: x.time_scheduled)
 
     def remove_event_from_queue(self, key_prefix: str, time_val: float):
-        # Python heapq는 임의 삭제가 어렵으므로, pop할 때 유효성 검사를 하거나
-        # fab_event_map에서 제거하여 처리 시점에 무시하도록 구현하는 것이 일반적임.
-        # 여기서는 map에서 제거하는 것으로 마킹함.
+        # Python's heapq does not support arbitrary removal, so the usual approach is to
+        # validate on pop or to remove from fab_event_map so the event is ignored when processed.
+        # Here we mark it by removing it from the map.
         keys_to_remove = [k for k in self.fab_event_map.keys() if k.startswith(key_prefix)]
         for k in keys_to_remove:
             del self.fab_event_map[k]

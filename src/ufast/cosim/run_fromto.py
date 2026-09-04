@@ -1,14 +1,15 @@
 """
-ufast/cosim/run_fromto.py — logistics-only 모드 실행기 (`ufast-fromto`).
+ufast/cosim/run_fromto.py — logistics-only mode runner (`ufast-fromto`).
 
-생산 데이터 없이 레일 레이아웃(.rail) + FromTo 수요표(.dat)만으로 AMHS 층을
-구동한다. co-simulation 모드(run.py)와 **같은 AMHSExecutor** 를 쓰므로
-운동학 자유주행 시간, 용량 제약 blocking(queue) + 데드락 해소, delay 변형,
-배차·라우팅·idle 전략, 커스텀 플러그인, KPI JSON/CSV, Rerun 재생이 동일하다.
-이벤트 큐는 UFastInstance 대신 HeapInstance(경량 shim) 가 맡는다.
+Drives the AMHS layer from a rail layout (.rail) + FromTo demand table (.dat) alone,
+without production data. It uses the **same AMHSExecutor** as co-simulation mode
+(run.py), so the kinematic free-flow times, capacity-constrained blocking (queue) +
+deadlock resolution, delay variants, assignment/routing/idle strategies, custom
+plugins, KPI JSON/CSV and Rerun replay are identical. The event queue is handled
+by HeapInstance (a lightweight shim) instead of UFastInstance.
 
-`--engine legacy` 는 이전 GUI 컨트롤러 기반 실행기(run_legacy.py: 상수 속도
-1 m/s, blocking 없음)를 호출한다 — 비교·회귀 용도로만 남겨 둔다.
+`--engine legacy` invokes the former GUI-controller-based runner (run_legacy.py:
+constant speed 1 m/s, no blocking) — kept only for comparison and regression.
 """
 from __future__ import annotations
 import os
@@ -35,9 +36,10 @@ def run_fromto(rail_file: str, fromto_file: str, *,
                vehicle_spec: VehicleSpec = None,
                viz: bool = False, strict: bool = False,
                verbose: bool = True) -> dict:
-    """FromTo 수요를 AMHSExecutor(blocking 엔진)로 헤드리스 실행한다.
+    """Run FromTo demand headlessly with AMHSExecutor (blocking engine).
 
-    반환: 결과 요약 dict (result_path 포함). 결과 JSON 은 results/<run_id>/ 에 저장.
+    Returns: result summary dict (including result_path). The result JSON is saved
+    under results/<run_id>/.
     """
     run_id = new_result_run_id()
     if vehicle_spec is None:
@@ -47,7 +49,7 @@ def run_fromto(rail_file: str, fromto_file: str, *,
     log(f"[fromto] fromto={fromto_file}")
     log(f"[fromto] duration={sim_duration_s:.0f}s | OHT={num_oht} | seed={seed}")
 
-    # ── 레이아웃 + 라우팅 (run.py 와 동일: 거리 기준 최단경로, 시간은 운동학) ──
+    # ── Layout + routing (same as run.py: distance-based shortest path, times from kinematics) ──
     rm = RouteManager()
     rm.load_from_rail(rail_file)
     rm.initialize(line_speed=1.0, curve_speed=1.0)
@@ -56,23 +58,23 @@ def run_fromto(rail_file: str, fromto_file: str, *,
     bridge.enable_route_cost_cache(
         True, ttl=5.0 if routing_model == 'dynamic' else float('inf'))
     get_logistics_logger().enabled = False
-    log(f"[fromto] 레일: 노드 {rm.network.node_count:,} / 링크 "
+    log(f"[fromto] rail: nodes {rm.network.node_count:,} / links "
         f"{rm.network.link_count:,} / EQ {len(rm.network.eq_to_node):,} / "
         f"sections {len(bridge.section_to_nodes):,}")
 
-    # ── FromTo 수요 + 정합성 검사 ──
+    # ── FromTo demand + consistency check ──
     fromto_data = load_fromto(fromto_file)
     from ufast.common.consistency import check_fromto
     report = check_fromto(fromto_data, rm.network.eq_to_node.keys())
     if verbose or not report.ok:
         print(f"[fromto] {report.summary()}")
     if not report.ok and not strict:
-        print("[fromto] ⚠️  미매칭 레코드는 이벤트 생성에서 제외됩니다. "
-              "--strict 로 중단 가능.")
+        print("[fromto] ⚠️  unmatched records are excluded from event generation. "
+              "Use --strict to abort instead.")
     if strict:
         report.raise_if_invalid()
 
-    # ── AMHS 층 (co-simulation 과 동일 엔진) ──
+    # ── AMHS layer (same engine as co-simulation) ──
     amhs, heap = setup_fromto_amhs(
         rm, bridge, vehicle_spec.kinematics(), fromto_data, num_oht,
         sim_duration_s, seed=seed, congestion_alpha=congestion_alpha,
@@ -81,15 +83,15 @@ def run_fromto(rail_file: str, fromto_file: str, *,
         record_trajectory=viz, oht_footprint_mm=vehicle_spec.footprint_mm,
         line_speed_mm_s=vehicle_spec.line_speed_mm_s,
         curve_speed_mm_s=vehicle_spec.curve_speed_mm_s)
-    log(f"[fromto] 차량: {vehicle_spec.describe()}")
-    log(f"[fromto] AMHS dispatch 전략: {amhs_strategy}")
+    log(f"[fromto] vehicle: {vehicle_spec.describe()}")
+    log(f"[fromto] AMHS dispatch strategy: {amhs_strategy}")
     if congestion_model == 'queue':
         caps = amhs.section_capacity.values()
-        log(f"[fromto] 혼잡 모델: queue (blocking) — section 용량 "
+        log(f"[fromto] congestion model: queue (blocking) — section capacity "
             f"min {min(caps)} / max {max(caps)}")
     else:
-        log(f"[fromto] 혼잡 모델: {congestion_model} (α={congestion_alpha})")
-    log(f"[fromto] 이송 요청 등록: {heap.pending_count():,}")
+        log(f"[fromto] congestion model: {congestion_model} (α={congestion_alpha})")
+    log(f"[fromto] transport requests scheduled: {heap.pending_count():,}")
 
     from ufast.cosim.run import _inject_custom_strategies
     custom_used = _inject_custom_strategies(
@@ -97,15 +99,15 @@ def run_fromto(rail_file: str, fromto_file: str, *,
         assignment=custom_assignment_path, idle_positioning=custom_idle_path,
         routing_cost=custom_routing_cost_path, tag='fromto')
 
-    # ── next-event 루프 ──
+    # ── next-event loop ──
     t0 = time.time()
     heap.pop_until(sim_duration_s)
     elapsed = time.time() - t0
-    log(f"\n[fromto] 시뮬레이션 완료 — wall {elapsed:.1f}s, "
-        f"sim {heap.current_time:.1f}s, 이송 완료 {amhs.total_jobs:,} / "
-        f"요청 {amhs.total_requested_jobs:,}")
+    log(f"\n[fromto] simulation finished — wall {elapsed:.1f}s, "
+        f"sim {heap.current_time:.1f}s, transports completed {amhs.total_jobs:,} / "
+        f"requested {amhs.total_requested_jobs:,}")
 
-    # ── 결과 저장 + 분석 (production 과 동일 흐름) ──
+    # ── Save results + analysis (same flow as production) ──
     from ufast.cosim.results import (collect_fromto_amhs_results, save_results,
                                      auto_result_path, save_csv_exports)
     from ufast.cosim.analyze import analyze_one
@@ -135,7 +137,7 @@ def run_fromto(rail_file: str, fromto_file: str, *,
     out_path = save_results(results, auto_result_path(DEFAULT_RESULTS_DIR, meta))
     csv_paths = save_csv_exports(out_path, trip_log=amhs.trip_log,
                                  kpi_snapshots=amhs.kpi_snapshots)
-    log(f"[fromto] 결과 저장: {out_path}")
+    log(f"[fromto] results saved: {out_path}")
     if csv_paths:
         log(f"[fromto] CSV export: {len(csv_paths)} files — "
             f"{', '.join(os.path.basename(p) for p in csv_paths)}")
@@ -151,12 +153,12 @@ def run_fromto(rail_file: str, fromto_file: str, *,
                 amhs.trip_log, amhs.initial_positions,
                 kpi_snapshots=amhs.kpi_snapshots, oht_total=len(amhs.ohts))
             traj_log.save(traj_path)
-            log(f"[fromto] 궤적 저장: {traj_path} (trip {len(traj_log.trips):,})")
+            log(f"[fromto] trajectories saved: {traj_path} (trips {len(traj_log.trips):,})")
             from ufast.viz.rerun_replay import show_run
-            log("[fromto] Rerun 시각화 시작...")
+            log("[fromto] starting Rerun visualisation...")
             show_run(rail_file, traj_path)
         except Exception as e:
-            print(f"[fromto] ⚠️  시각화 실패: {e}")
+            print(f"[fromto] ⚠️  visualisation failed: {e}")
 
     return {**meta, 'jobs_requested': amhs.total_requested_jobs,
             'jobs_completed': amhs.total_jobs, 'result_path': out_path,

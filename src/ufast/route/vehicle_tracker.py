@@ -1,10 +1,10 @@
 """
-vehicle_tracker.py - 노드 단위 차량 추적 및 데드락 탐지
+vehicle_tracker.py - node-level vehicle tracking and deadlock detection
 
-시뮬레이션에서 OHT의 노드 점유 상태를 관리하고,
-wait-for 그래프 기반 데드락을 탐지한다.
+Manages the node occupancy state of OHTs in the simulation and
+detects deadlocks using a wait-for graph.
 
-Java RouteManager의 실시간 차량 관리 기능을 시뮬레이션용으로 재설계.
+A simulation-oriented redesign of the Java RouteManager's real-time vehicle management.
 """
 
 from __future__ import annotations
@@ -76,9 +76,10 @@ class VehicleTracker:
     def register_vehicle(self, name: str, initial_node: Optional[str] = None, status: str = "IDLE") -> VehicleState:
         vehicle = VehicleState(name=name, current_node=initial_node, status=status, idle_since=self.sim_time)
         self.vehicles[name] = vehicle
-        # 주의: current_node는 "현재 속한 섹션의 대표 노드"일 뿐 실제 점유 가능한 단일 노드가 아니다.
-        # section/buffer 시뮬레이터에서는 한 섹션에 여러 OHT가 함께 존재할 수 있으므로,
-        # 여기서 node_occupancy를 영구 점유로 올리면 이후 reservation 단계가 과도하게 막힌다.
+        # Note: current_node is only the "representative node of the current section", not a
+        # single node that can actually be occupied. In the section/buffer simulator several OHTs
+        # may share one section, so marking node_occupancy as a permanent occupancy here would
+        # over-block the subsequent reservation stage.
         self.vehicle_reserved_nodes.setdefault(name, set())
         self.vehicle_reserved_zones.setdefault(name, set())
         return vehicle
@@ -118,9 +119,9 @@ class VehicleTracker:
 
     def can_reserve_path(self, vehicle_name: str, node_list: List[str]) -> bool:
         self._purge_expired()
-        # 이 시뮬레이터에서는 current_node가 section 대표 노드이므로 node_occupancy를
-        # 하드 블로킹 조건으로 쓰지 않는다. 실제 충돌 회피는 conflict zone reservation과
-        # section buffer(front/slot) 제약으로 처리한다.
+        # In this simulator current_node is the section's representative node, so node_occupancy
+        # is not used as a hard blocking condition. Actual collision avoidance is handled by
+        # conflict zone reservations and the section buffer (front/slot) constraints.
         for node in node_list:
             res = self.node_reservations.get(node)
             if res is not None and res[0] != vehicle_name:
@@ -215,7 +216,7 @@ class VehicleTracker:
         old_node = vehicle.current_node
         self.release_node(vehicle_name, old_node)
         vehicle.current_node = node_name
-        # current_node는 대표 위치 정보만 갱신한다. 영구 node 점유는 올리지 않는다.
+        # Only update current_node as the representative position; do not mark a permanent node occupancy.
 
     def get_available_next_nodes(self, node_name: str) -> List[str]:
         self._purge_expired()

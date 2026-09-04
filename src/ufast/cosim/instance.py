@@ -52,8 +52,8 @@ class UFastInstance(FileInstance):
         self._static_transport_dist = {}
         self._machine_xy_cache = {}
         self._preselect_exact_candidates = 8
-        # 머신 선택 모드: 'exact'=후보별 정확 route(Dijkstra), 'nearest'=rough
-        # 유클리드 거리만(목적지 선택용, Dijkstra 생략 → perf #3).
+        # Machine selection mode: 'exact' = exact route (Dijkstra) per candidate, 'nearest' =
+        # rough Euclidean distance only (for destination choice, skips Dijkstra → perf #3).
         self.machine_selection = machine_selection
 
         super().__init__(files, run_to, lot_for_machine, plugins,
@@ -100,7 +100,7 @@ class UFastInstance(FileInstance):
         return max(self.current_time, min(times)) if times else self.current_time
 
     def _machine_xy(self, machine):
-        """머신 위치 좌표 캐시 (노드 매핑은 실행 중 불변)."""
+        """Cache of machine position coordinates (the node mapping is immutable during a run)."""
         idx = machine.idx
         if idx in self._machine_xy_cache:
             return self._machine_xy_cache[idx]
@@ -153,9 +153,9 @@ class UFastInstance(FileInstance):
         if not candidates:
             return None
 
-        # 단일 패스 사전계산: setup 페널티와 rough(유클리드) 거리·가용시각을
-        # 머신당 한 번씩만 계산한다. 키 함수는 기존과 동일한 튜플을 만들므로
-        # 선택 결과(동률 포함)는 변하지 않는다.
+        # Single-pass precomputation: setup penalty, rough (Euclidean) distance and
+        # availability time are computed once per machine. The key functions build the
+        # same tuples as before, so the selection (including ties) is unchanged.
         step = lot.actual_step
         new_setup = step.setup_needed
         cur = self.rm.network.nodes.get(current_node) if current_node else None
@@ -249,14 +249,16 @@ class UFastInstance(FileInstance):
 
     def _lot_ready_for_step(self, lot, old_step):
         cur = getattr(lot, "current_node", None)
-        # 이송 창(starvation transport 귀속용) — 이번 step 에서 실제 이송이
-        # 발생할 때만 아래에서 설정한다. 이전 step 의 창이 남지 않게 먼저 클리어.
+        # Transit window (for attributing starvation to transport) — set below only when
+        # a real transport happens in this step. Clear first so the previous step's
+        # window does not linger.
         lot.last_transit_start = None
         lot.last_transit_end = None
-        # 목적지용으로만 개별 머신을 선택한다(이송 도착 노드 = 그 머신 위치).
-        # 생산 디스패칭은 예약으로 묶지 않고 family 전체 큐에 맡긴다 — 예약은
-        # usable_machines 를 고갈시켜 high-WIP 에서 production gridlock 을
-        # 유발했다(day41 정지). 도착한 lot 은 family 의 먼저 비는 머신이 가공.
+        # Select an individual machine only as the destination (transport arrival node =
+        # that machine's position). Production dispatching is not bound by a reservation
+        # but left to the family-wide queue — reservations exhausted usable_machines and
+        # caused production gridlock under high WIP (stall at day 41). An arriving lot is
+        # processed by whichever machine of the family frees up first.
         machine = self._select_machine_for_lot(lot, cur)
         dest = self.machine_node(machine) if machine is not None else self.family_node(lot.actual_step.family)
 

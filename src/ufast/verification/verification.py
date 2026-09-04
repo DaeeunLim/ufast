@@ -1,8 +1,8 @@
 """
 Verification utilities for AMHS simulation logs/state.
 
-이 모듈은 시뮬레이션 동작에는 개입하지 않고, 저장 시점의 상태와 logger 기록을
-기반으로 rule violation 리포트만 생성한다.
+This module does not interfere with the simulation; it only generates a rule
+violation report from the state at save time and the logger records.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def run_verification(output_dir: str, data_set: Any, logger: Any, route_manager:
 
     valid_status = {"IDLE", "ASSIGNED", "LOADED", "REPOSITIONING"}
 
-    # V0xx: OHT 상태 및 section 유효성
+    # V0xx: OHT status and section validity
     for name, oht in getattr(data_set, "oht_list", {}).items():
         if getattr(oht, "status", None) not in valid_status:
             _add(rows, "V001", "ERROR", "OHT", name, f"invalid OHT status: {getattr(oht, 'status', None)}")
@@ -39,7 +39,7 @@ def run_verification(output_dir: str, data_set: Any, logger: Any, route_manager:
         if getattr(oht, "status", None) == "LOADED" and not getattr(oht, "loaded_lot_info", None):
             _add(rows, "V003", "WARN", "OHT", name, "LOADED status but loaded_lot_info is empty")
 
-    # V1xx: buffer 중복 점유 및 capacity 초과
+    # V1xx: duplicate buffer occupancy and capacity overflow
     seen = {}
     for sec in getattr(data_set, "sections", []):
         for b_idx, buf in enumerate(getattr(sec, "oht_buffers", [])):
@@ -54,14 +54,14 @@ def run_verification(output_dir: str, data_set: Any, logger: Any, route_manager:
                 else:
                     seen[key] = loc
 
-    # V2xx: Lot timestamp 순서
+    # V2xx: lot timestamp ordering
     for lot_id, rec in getattr(logger, "lot_records", {}).items():
         if rec.pickup_time >= 0 and rec.pickup_time < rec.created_time:
             _add(rows, "V201", "ERROR", "LOT", lot_id, "pickup_time earlier than created_time")
         if rec.delivered_time >= 0 and rec.pickup_time >= 0 and rec.delivered_time < rec.pickup_time:
             _add(rows, "V202", "ERROR", "LOT", lot_id, "delivered_time earlier than pickup_time")
 
-    # V3xx: Rundown timestamp 순서
+    # V3xx: rundown timestamp ordering
     for rec in getattr(logger, "eq_rundown_records", []):
         if rec.process_start_time >= 0 and rec.wait_start_time >= 0 and rec.process_start_time < rec.wait_start_time:
             _add(rows, "V301", "ERROR", "EQ_RUNDOWN", str(rec.seq), "process_start_time earlier than wait_start_time")

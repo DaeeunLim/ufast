@@ -1,23 +1,24 @@
 """
 ProductionRunner
 ================
-PySCFabSim 의 greedy 시뮬레이션 루프를 통합 GUI 안에서 구동하는 어댑터.
+Adapter that drives PySCFabSim's greedy simulation loop inside the integrated GUI.
 
-물류 시뮬레이터는 실시간 애니메이션(이벤트를 main_clock 으로 진행)이지만,
-생산 시뮬레이터는 보통 수개월~수년 단위의 sim-time 을 빠르게 계산한다.
-따라서 "실시간 1x" 개념을 그대로 적용할 수 없다.
+The AMHS simulator is a real-time animation (events advanced by main_clock),
+whereas the production simulator typically computes months to years of sim-time
+quickly. The "real-time 1x" notion therefore cannot be applied directly.
 
-통합 전략
----------
-1. greedy 루프를 백그라운드 스레드에서 *최대한 빠르게* 끝까지 계산한다.
-2. 계산 중 sim-time 간격마다 Snapshot 을 TimelineRecorder 에 기록한다.
-3. 계산이 끝나면 GUI 는 기록된 타임라인을 진행바로 재생(스크럽)한다.
-   - 이때 speed 슬라이더는 "재생 배속"으로 동작한다.
+Integration strategy
+--------------------
+1. Run the greedy loop to completion in a background thread *as fast as possible*.
+2. While computing, record a Snapshot into the TimelineRecorder at each sim-time interval.
+3. When the computation finishes, the GUI replays (scrubs) the recorded timeline
+   with the progress bar.
+   - The speed slider then acts as the "replay speed multiplier".
 
-이 방식 덕분에 물류/생산 두 모드가 동일한 타임라인 재생 UI 를 공유한다.
+Thanks to this approach, the AMHS and production modes share the same timeline replay UI.
 
-PySCFabSim 의 입력은 *dataset 폴더*(예: datasets/HVLM) 이며, 이는
-원본 시뮬레이터 설정 그대로 read_all() 로 로딩된다.
+PySCFabSim's input is a *dataset folder* (e.g. datasets/HVLM), loaded with
+read_all() exactly as in the original simulator configuration.
 """
 
 from __future__ import annotations
@@ -32,8 +33,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ufast.integration.timeline import Snapshot, TimelineRecorder
 
 
-# greedy 의사결정 함수들은 CLI co-sim 과 같은 production 엔진에서 재사용한다.
-# (Phase 2: simulation/ 사본 의존 제거 — 엔진 단일화)
+# The greedy decision functions are reused from the same production engine as the CLI co-sim.
+# (Phase 2: dependency on the simulation/ copy removed — single engine)
 from ufast.production.greedy import (
     get_lots_to_dispatch_by_machine,
     get_lots_to_dispatch_by_lot,
@@ -47,11 +48,11 @@ from ufast.common.equipment_kpi import collect_equipment_kpis
 
 
 def _get_lot_statistics(instance):
-    """lot 단위 상세 통계 (일 단위).
+    """Detailed per-lot statistics (in days).
 
-    simulation/stats.py 의 get_lot_statistics 를 이식 — production/stats.py 에는
-    없는 함수인데, 엔진 무변경 원칙에 따라 production/ 을 고치지 않고
-    GUI 어댑터인 이 모듈에 둔다.
+    Ported from get_lot_statistics in simulation/stats.py — the function does not
+    exist in production/stats.py, and under the no-engine-change policy it lives in
+    this GUI adapter module instead of modifying production/.
     """
     from collections import defaultdict
     lots = defaultdict(lambda: {
@@ -73,9 +74,9 @@ def _get_lot_statistics(instance):
 
 
 class ProductionParams:
-    """PySCFabSim run_greedy_core 가 기대하는 파라미터 객체.
+    """Parameter object expected by PySCFabSim's run_greedy_core.
 
-    원본 main.py 의 simulation_parameters 클래스와 동일한 필드를 갖는다.
+    Has the same fields as the simulation_parameters class in the original main.py.
     """
 
     def __init__(
@@ -100,13 +101,13 @@ class ProductionParams:
 
 
 class ProductionRunner(QThread):
-    """생산 시뮬레이션을 백그라운드에서 계산하며 타임라인을 채운다."""
+    """Computes the production simulation in the background while filling the timeline."""
 
     progress = pyqtSignal(float, int, int)   # (current_time_days, done_lots, active_lots)
     status_message = pyqtSignal(str)
     finished_ok = pyqtSignal()
     failed = pyqtSignal(str)
-    results_ready = pyqtSignal(dict)         # 계산 완료 즉시 결과 요약 전달
+    results_ready = pyqtSignal(dict)         # delivers the result summary as soon as computation finishes
 
     def __init__(
         self,
@@ -121,7 +122,7 @@ class ProductionRunner(QThread):
         self.recorder = recorder
         self.seed = seed
         self.datasets_root = datasets_root
-        # 스냅샷 간격을 일(day) 단위로 받아 초로 환산
+        # Snapshot interval is given in days; convert to seconds
         self.snapshot_interval_sec = max(1.0, snapshot_interval_days * 86400.0)
         self._active = False
         self.lot_stats = None
@@ -130,18 +131,18 @@ class ProductionRunner(QThread):
     def request_stop(self):
         self._active = False
 
-    # ── 스냅샷 빌더 ──────────────────────────────────────────
+    # ── Snapshot builder ─────────────────────────────────────
     def _build_snapshot(self, instance) -> Snapshot:
         done = len(instance.done_lots)
         active = len(instance.active_lots)
         dispatchable = len(instance.dispatchable_lots)
         total = done + active + dispatchable
 
-        # 머신 상태 요약: 가동/유휴 카운트
+        # Machine status summary: busy/idle counts
         busy = 0
         idle = 0
         for m in instance.machines:
-            # waiting_lots 가 비어있고 setup 변화가 없으면 유휴로 간주(요약 지표)
+            # Treated as idle if waiting_lots is empty and no setup change (summary metric)
             if getattr(m, "waiting_lots", None):
                 busy += 1
             else:
@@ -150,12 +151,12 @@ class ProductionRunner(QThread):
         cur_days = instance.current_time_days
         throughput_per_day = (done / cur_days) if cur_days > 0 else 0.0
 
-        # ── WIP 시계열 샘플 누적 (결과 KPI 의 avg/peak WIP 계산용) ──
+        # ── Accumulate WIP time-series samples (for avg/peak WIP in the result KPIs) ──
         if not hasattr(instance, "wip_samples"):
             instance.wip_samples = []
         instance.wip_samples.append((float(instance.current_time), active))
 
-        # ── Run-down time (고장+PM) 순간 집계 ──
+        # ── Instantaneous run-down time (breakdown + PM) aggregate ──
         total_down = 0.0
         for m in instance.machines:
             total_down += float(getattr(m, "bred_time", 0.0) or 0.0)
@@ -177,14 +178,14 @@ class ProductionRunner(QThread):
                 "machines_busy": busy,
                 "machines_idle": idle,
                 "throughput_per_day": round(throughput_per_day, 2),
-                # 추가 KPI
+                # Additional KPIs
                 "wip": active,
                 "total_downtime_s": round(total_down, 1),
                 "downtime_pct": down_pct,
             },
         )
 
-    # ── 스레드 진입점 ────────────────────────────────────────
+    # ── Thread entry point ───────────────────────────────────
     def run(self):
         self._active = True
         try:
@@ -199,8 +200,8 @@ class ProductionRunner(QThread):
 
     def _run_impl(self):
         p = self.params
-        # dataset 가 절대경로(또는 기존 datasets_root 외부 경로)이면 그대로 사용,
-        # 아니면 datasets_root 하위 폴더로 해석한다.
+        # If dataset is an absolute path (or an existing path outside datasets_root) use it
+        # as is; otherwise resolve it as a subfolder of datasets_root.
         if os.path.isabs(p.dataset) or os.path.isdir(p.dataset):
             dataset_path = p.dataset
         else:
@@ -218,15 +219,15 @@ class ProductionRunner(QThread):
         l4m = (p.alg == "l4m")
 
         plugins = [CostPlugin()]
-        # production.FileInstance 는 congestion factor 파라미터를 받지 않는다
-        # (이송시간 팽창 모델은 simulation/ 사본 전용 기능이었음 —
-        #  실제 혼잡 모델링은 CLI co-sim(ufast)이 담당)
+        # production.FileInstance does not take a congestion factor parameter
+        # (the transport-time inflation model was a feature only of the simulation/ copy —
+        #  actual congestion modelling is handled by the CLI co-sim (ufast))
         instance = FileInstance(files, run_to, l4m, plugins)
         dispatcher = dispatcher_map[p.dispatcher]
 
         self.recorder.reset(mode="production",
                             snapshot_interval=self.snapshot_interval_sec)
-        # 시작 스냅샷
+        # Initial snapshot
         self.recorder.record(self._build_snapshot(instance))
 
         start = datetime.now()
@@ -254,13 +255,13 @@ class ProductionRunner(QThread):
                 else:
                     instance.dispatch(machine, lots)
 
-            # 스냅샷 (sim-time 간격 기준)
+            # Snapshot (at sim-time intervals)
             self.recorder.maybe_record(
                 instance.current_time,
                 lambda inst=instance: self._build_snapshot(inst),
             )
 
-            # 진행 상황 보고 (하루 단위)
+            # Progress report (once per day)
             cur_day = int(instance.current_time_days)
             if cur_day != last_emit_day:
                 last_emit_day = cur_day
@@ -279,18 +280,18 @@ class ProductionRunner(QThread):
             return
 
         instance.finalize()
-        # 종료 스냅샷
+        # Final snapshot
         self.recorder.record(self._build_snapshot(instance))
 
         self.compute_duration = datetime.now() - start
         self.lot_stats = _get_lot_statistics(instance)
 
-        # 결과 요약(GUI 표시용) 계산 후 즉시 emit
+        # Compute the result summary (for GUI display) and emit immediately
         summary = self._build_result_summary(instance)
         summary["compute_duration"] = str(self.compute_duration)
-        # 저장용: lot 단위 상세 통계 (lot_id -> dict)
+        # For saving: detailed per-lot statistics (lot_id -> dict)
         summary["lot_stats_detail"] = self.lot_stats
-        # 실행 파라미터 기록 (재현용)
+        # Record run parameters (for reproducibility)
         summary["params"] = {
             "dataset": self.params.dataset,
             "days": self.params.days,
@@ -307,9 +308,9 @@ class ProductionRunner(QThread):
             f"compute time {self.compute_duration}"
         )
 
-    # ── 결과 요약 (PyQt6 창에 바로 표시) ─────────────────────
+    # ── Result summary (shown directly in the PyQt6 window) ──
     def _build_result_summary(self, instance) -> dict:
-        """원본 PySCFabSim 통계와 동일한 핵심 지표를 lot-type 별로 집계."""
+        """Aggregate the same core metrics as the original PySCFabSim statistics per lot type."""
         import statistics
         from collections import defaultdict
 
@@ -336,7 +337,7 @@ class ProductionRunner(QThread):
                 "avg_tardiness_days": round(a["tardiness"] / th, 2) if th else 0.0,
             })
 
-        # 머신 가동률 요약 (family 별 평균 util + 다운타임)
+        # Machine utilisation summary (mean util + downtime per family)
         util_by_family = defaultdict(list)
         down_by_family = defaultdict(list)
         sim_t = instance.current_time or 1
@@ -362,7 +363,7 @@ class ProductionRunner(QThread):
                 "pm_time_s": family_kpi.get("pm_time_s", 0.0),
             })
 
-        # ── WIP & Run-down time 요약 ──
+        # ── WIP & run-down time summary ──
         wip_samples = getattr(instance, "wip_samples", None) or []
         wips = [w for _, w in wip_samples]
         wip_summary = {

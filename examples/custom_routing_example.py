@@ -1,10 +1,10 @@
 """
-커스텀 Routing 전략 예시.
+Custom routing strategy example.
 
-반환 규칙:
-- get_route(from_sec_id, to_sec_id, vehicle_controller)를 정의한다.
-- 반환값은 현재 섹션을 제외한 section_id 리스트다.
-- None 또는 빈 리스트를 반환하면 기존 기본 Routing으로 fallback된다.
+Return rules:
+- Define get_route(from_sec_id, to_sec_id, vehicle_controller).
+- The return value is a list of section_ids excluding the current section.
+- Returning None or an empty list falls back to the built-in default routing.
 """
 from collections import deque
 

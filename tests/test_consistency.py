@@ -1,4 +1,4 @@
-"""ufast.common.consistency — 입력 정합성 검사 단위 테스트."""
+"""ufast.common.consistency — unit tests for the input consistency checks."""
 import sys
 from pathlib import Path
 import unittest
@@ -19,9 +19,9 @@ class TestCheckFromto(unittest.TestCase):
         report.raise_if_invalid()  # no-op
 
     def test_unknown_equipment_counted(self):
-        data = [('EQ_A', 'EQ_X', 10.0),   # to 미매칭
-                ('EQ_X', 'EQ_Y', 5.0),    # 양쪽 미매칭
-                ('EQ_A', 'EQ_B', 1.0)]    # 정상
+        data = [('EQ_A', 'EQ_X', 10.0),   # 'to' unmatched
+                ('EQ_X', 'EQ_Y', 5.0),    # both unmatched
+                ('EQ_A', 'EQ_B', 1.0)]    # valid
         report = check_fromto(data, {'EQ_A', 'EQ_B'})
         self.assertFalse(report.ok)
         self.assertTrue(report.total == 3 and report.valid == 1)
@@ -46,7 +46,7 @@ class TestCheckProductionFamilies(unittest.TestCase):
         self.assertTrue(report.ok)
 
     def test_case_insensitive_node_match(self):
-        # UFastInstance.family_node 의 대소문자 무시 폴백과 동일 기준
+        # Same criterion as the case-insensitive fallback of UFastInstance.family_node
         report = check_production_families(['fam_a'], {'FAM_A': 'n1'})
         self.assertTrue(report.ok)
 
@@ -56,7 +56,7 @@ class TestCheckProductionFamilies(unittest.TestCase):
         self.assertTrue(report.ok)
 
     def test_empty_equipment_pool_not_resolved(self):
-        # Equipment.csv 에 family 키만 있고 장비가 없으면 목적지 해석 불가
+        # A family key in Equipment.csv with no equipment cannot resolve a destination
         report = check_production_families(['FAM_C'], {}, {'FAM_C': []})
         self.assertFalse(report.ok)
 

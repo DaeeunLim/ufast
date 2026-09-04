@@ -1,15 +1,15 @@
 """
-results.py — ufast 실행 결과를 KPI dict 로 추출/저장.
+results.py — extract/save ufast run results as a KPI dict.
 
-저장 포맷: JSON (집계 KPI) + CSV 4종 (raw 데이터, 논문/R/pandas 분석용):
-  - trips.csv          OHT trip 별 (record_trajectory 일 때만 채움)
-  - kpi_timeseries.csv KPI snapshot 시계열 (record_trajectory 일 때만 채움)
-  - lots.csv           완료 lot 별 (production 모드)
-  - machines.csv       머신 활동 구간 (MachineActivityPlugin 켜진 경우)
+Output format: JSON (aggregated KPIs) + 4 CSVs (raw data for paper/R/pandas analysis):
+  - trips.csv          per OHT trip (filled only with record_trajectory)
+  - kpi_timeseries.csv KPI snapshot time series (filled only with record_trajectory)
+  - lots.csv           per completed lot (production mode)
+  - machines.csv       machine activity periods (when MachineActivityPlugin is enabled)
 
-집계 단위:
-  - by_lot_type : 개별 LOT (Lot_3, HotLot_3, ...) — 논문 Table 1 (HVLM) 매칭
-  - by_category : Regular/Hot/SuperHot — 논문 Table 3 (LVHM=HMLV) 매칭
+Aggregation units:
+  - by_lot_type : individual LOT (Lot_3, HotLot_3, ...) — matches paper Table 1 (HVLM)
+  - by_category : Regular/Hot/SuperHot — matches paper Table 3 (LVHM=HMLV)
 """
 from __future__ import annotations
 import csv
@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from ufast.common.equipment_kpi import collect_equipment_kpis
 
-# 결과 저장 루트: <repo>/results (소스 트리 밖)
+# Result root: <repo>/results (outside the source tree)
 from ufast.paths import RESULTS_DIR as DEFAULT_RESULTS_DIR
 
 
@@ -31,7 +31,7 @@ def new_result_run_id() -> str:
 
 
 def categorize(lot_name: str) -> str:
-    """LOT 이름 → 우선순위 카테고리."""
+    """LOT name → priority category."""
     if lot_name.startswith('SuperHotLot'):
         return 'SuperHot'
     if lot_name.startswith('HotLot'):
@@ -52,7 +52,7 @@ def _fmt_suffix_number(value: Any) -> str:
 
 
 def _aggregate(lots: List) -> Dict[str, Any]:
-    """lot 그룹의 KPI 집계 (Cycle Time / Throughput / On-Time / ...)."""
+    """KPI aggregation for a group of lots (Cycle Time / Throughput / On-Time / ...)."""
     n = len(lots)
     if n == 0:
         return None
@@ -73,7 +73,7 @@ def _aggregate(lots: List) -> Dict[str, Any]:
 
 
 def _percentile(sorted_vals: List[float], q: float) -> float:
-    """선형 보간 percentile (q ∈ [0,100]). sorted_vals 는 오름차순 가정."""
+    """Linearly interpolated percentile (q ∈ [0,100]). sorted_vals is assumed ascending."""
     n = len(sorted_vals)
     if n == 0:
         return 0.0
@@ -86,7 +86,7 @@ def _percentile(sorted_vals: List[float], q: float) -> float:
 
 
 def _tail_stats(samples: List[float], prefix: str) -> Dict[str, float]:
-    """측정창 샘플의 꼬리 통계 — H2(배달시간 꼬리 vs 생산 KPI) 검증용."""
+    """Tail statistics of measurement-window samples — for testing H2 (delivery-time tail vs production KPIs)."""
     s = sorted(samples)
     return {
         f'{prefix}_p50_s': round(_percentile(s, 50), 2),
@@ -97,7 +97,7 @@ def _tail_stats(samples: List[float], prefix: str) -> Dict[str, float]:
 
 
 def collect_results(instance, amhs, meta: Dict[str, Any]) -> Dict[str, Any]:
-    """완료된 simulation 의 KPI 를 dict 로 모은다."""
+    """Collect the KPIs of a completed simulation into a dict."""
     if hasattr(amhs, '_update_busy_time'):
         amhs._update_busy_time(instance.current_time)
     done = instance.done_lots
@@ -131,7 +131,7 @@ def collect_results(instance, amhs, meta: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _amhs_kpis(amhs, current_time: float) -> Dict[str, Any]:
-    """AMHSExecutor 누적 통계 → KPI dict (production / fromto 공용)."""
+    """AMHSExecutor cumulative statistics → KPI dict (shared by production / fromto)."""
     amhs_kpi = {
         'measurement_start_s': getattr(amhs, 'measurement_start_time', 0.0),
         'total_requested_jobs': getattr(amhs, 'total_requested_jobs', amhs.total_jobs),
@@ -154,14 +154,14 @@ def _amhs_kpis(amhs, current_time: float) -> Dict[str, Any]:
         **_tail_stats(getattr(amhs, 'delivery_samples', []), 'delivery'),
         **_tail_stats(getattr(amhs, 'transport_samples', []), 'transport'),
         'max_queue': amhs.max_queue,
-        # section-aware refactor 후 의미: 한 section 에 동시에 점유된 OHT 최대치
-        # (이전엔 노드 점유 — 키 이름은 호환 위해 유지)
+        # Meaning after the section-aware refactor: max number of OHTs simultaneously
+        # occupying one section (previously node occupancy — key name kept for compatibility)
         'max_node_inflight': amhs.max_node_inflight,
-        # 'queue' 혼잡 모델 (capacity blocking) 전용 — 그 외 모델에서는 항상 0
+        # 'queue' congestion model (capacity blocking) only — always 0 for the other models
         'blocked_events': getattr(amhs, 'total_blocked_events', 0),
         'blocked_time_s': round(getattr(amhs, 'total_blocked_time', 0.0), 2),
         'deadlock_forced': getattr(amhs, 'deadlock_forced', 0),
-        # 섹션별 차단 heatmap 데이터 (queue 모드 외에는 빈 dict)
+        # per-section blocking heatmap data (empty dict outside queue mode)
         'blocked_by_section': {
             str(k): v
             for k, v in getattr(amhs, 'blocked_by_section', {}).items()},
@@ -184,11 +184,12 @@ def _amhs_kpis(amhs, current_time: float) -> Dict[str, Any]:
 
 def collect_fromto_amhs_results(meta: Dict[str, Any], amhs, current_time: float
                                 ) -> Dict[str, Any]:
-    """logistics-only 모드(AMHSExecutor 엔진) KPI dict.
+    """KPI dict for logistics-only mode (AMHSExecutor engine).
 
-    'transport' 블록은 legacy 엔진 결과와 같은 키(lots_generated/…)를 유지해
-    analyze 가 두 엔진 결과를 같은 방식으로 읽는다. 'amhs' 블록은 production
-    모드와 동일한 AMHS KPI (blocking / deadlock 통계 포함).
+    The 'transport' block keeps the same keys as the legacy engine results
+    (lots_generated/…) so that analyze reads both engines' results the same way.
+    The 'amhs' block is the same AMHS KPI as production mode (including blocking /
+    deadlock statistics).
     """
     if hasattr(amhs, '_update_busy_time'):
         amhs._update_busy_time(current_time)
@@ -213,9 +214,9 @@ def collect_fromto_results(meta: Dict[str, Any],
                            trajectory_data: Dict[str, Any] = None,
                            ) -> Dict[str, Any]:
     """
-    Fromto-driven 모드 KPI dict — production 과 동일한 wrapper 구조 (meta + ...).
+    KPI dict for fromto-driven mode — same wrapper structure as production (meta + ...).
 
-    trajectory_data 가 있으면 trip 별 통계까지 집계.
+    If trajectory_data is given, per-trip statistics are aggregated as well.
     """
     transport = {
         'lots_generated': data_set.lot_count,
@@ -231,7 +232,7 @@ def collect_fromto_results(meta: Dict[str, Any],
     if vehicle_controller.dispatcher is not None:
         transport['dispatch_stats'] = vehicle_controller.dispatcher.get_stats()
 
-    # trajectory 기반 trip 통계 (viz 모드에서만)
+    # trajectory-based trip statistics (viz mode only)
     if trajectory_data:
         trips = trajectory_data.get('trips', [])
         if trips:
@@ -248,7 +249,7 @@ def collect_fromto_results(meta: Dict[str, Any],
 
 
 def save_results(results: Dict[str, Any], out_path: str) -> str:
-    """결과를 JSON 으로 저장한다."""
+    """Save the results as JSON."""
     d = os.path.dirname(out_path)
     if d:
         os.makedirs(d, exist_ok=True)
@@ -264,17 +265,17 @@ def save_csv_exports(json_path: str, *,
                      machine_activities: Optional[List[Dict[str, Any]]] = None,
                      ) -> List[str]:
     """
-    JSON 옆에 4종 CSV 도 저장 — 논문·R·pandas 분석용.
+    Save the 4 CSVs next to the JSON — for paper / R / pandas analysis.
 
-    각 CSV 는 입력이 비어있으면 skip. 저장된 경로 리스트 반환.
+    Each CSV is skipped when its input is empty. Returns the list of saved paths.
 
-    파일 명명: <json_base>_trips.csv / _kpi_timeseries.csv / _lots.csv / _machines.csv
+    File naming: <json_base>_trips.csv / _kpi_timeseries.csv / _lots.csv / _machines.csv
 
-    인자:
-      trip_log         OHT trip dict 리스트 (amhs.trip_log 또는
-                       legacy_trajectory.recorder.trips 그대로)
-      kpi_snapshots    (sim_time, busy, inflight_sum, pending, delivered, max) 튜플
-      done_lots        production lot 객체 리스트 (name, release_at, done_at,
+    Arguments:
+      trip_log         list of OHT trip dicts (amhs.trip_log or
+                       legacy_trajectory.recorder.trips as is)
+      kpi_snapshots    (sim_time, busy, inflight_sum, pending, delivered, max) tuples
+      done_lots        list of production lot objects (name, release_at, done_at,
                        deadline_at, waiting_time, processing_time, transport_time)
       machine_activities  [{start, end, family}, ...]
     """
@@ -360,7 +361,7 @@ def save_csv_exports(json_path: str, *,
 
 
 def auto_result_path(results_dir: str, meta: Dict[str, Any]) -> str:
-    """결과 파일 자동 명명 (모드별). results_dir 는 결과 루트 (보통 DEFAULT_RESULTS_DIR)."""
+    """Automatic result file naming (per mode). results_dir is the result root (usually DEFAULT_RESULTS_DIR)."""
     mode = meta.get('mode', 'production')
     if mode == 'fromto':
         rail = os.path.splitext(meta.get('rail_short', 'unk'))[0]
@@ -381,9 +382,9 @@ def auto_result_path(results_dir: str, meta: Dict[str, Any]) -> str:
         cmod = meta.get('congestion_model', 'section_local')
         idle = meta.get('idle_positioning', 'off')
         rout = meta.get('routing_model', 'off')
-        # 약어
+        # abbreviations
         cmod_short = {'section_local': 'sl', 'global_tip': 'gt', 'off': 'no'}.get(cmod, cmod)
-        # default 가 아닌 옵션만 파일명에 — 'off' 들로 길어지는 것 방지
+        # only non-default options go into the file name — avoids bloating it with 'off's
         extras = ''
         if idle != 'off':
             extras += f'_idle{idle}'
@@ -391,7 +392,7 @@ def auto_result_path(results_dir: str, meta: Dict[str, Any]) -> str:
             extras += f'_r{rout[:3]}'  # 'dynamic' → 'rdyn'
         msel = meta.get('machine_selection', 'exact')
         if msel != 'exact':
-            extras += f'_ms{msel}'  # 'nearest' → '_msnearest' (exact 와 충돌 방지)
+            extras += f'_ms{msel}'  # 'nearest' → '_msnearest' (avoids clashing with exact)
         sw = float(meta.get('static_warmup_days', 0.0) or 0.0)
         settle = float(meta.get('amhs_settling_days', 0.0) or 0.0)
         if sw:

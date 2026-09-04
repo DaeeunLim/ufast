@@ -1,19 +1,30 @@
-# src/examples — 커스텀 전략 플러그인 예제
+# src/examples — custom strategy plugin examples
 
-## 역할
+## Role
 
-사용자가 직접 작성하는 물류 전략 플러그인의 **참조 구현 4종**. 각 파일은 `common/strategy_loader.py`가 인식하는 kind별 최소 규약(메서드 이름, 인자, 반환 형식, fallback 조건)을 docstring으로 명시하고 동작하는 예제를 제공한다. 모든 예제는 `None`(또는 빈 리스트/음수/예외) 반환 시 기본 전략으로 fallback된다. 새 배차/경로 알고리즘을 시험할 때 이 파일들을 복사해 수정하는 것이 표준 워크플로다.
+**Four reference implementations** of user-written logistics strategy plugins. Each file states in
+its docstring the minimal convention per kind recognised by `common/strategy_loader.py` (method
+name, arguments, return format, fallback condition) and provides a working example. Every example
+falls back to the default strategy when it returns `None` (or an empty list / a negative value /
+raises an exception). Copying and modifying these files is the standard workflow for trying out a
+new assignment/routing algorithm.
 
-## 파일별 역할
+## Files
 
-| 파일 | 규약 (kind) | 예제 내용 |
+| File | Convention (kind) | Example content |
 |---|---|---|
-| `custom_assignment_example.py` | `AssignmentStrategy.select(target_section_id, idle_ohts, route_manager, bridge, vehicle_controller)` — 배차 | 같은 섹션 OHT 최우선 → `bridge.estimate_section_route_cost()` 최소 비용 OHT → section id 차이 최소 순 |
-| `custom_routing_example.py` | `RoutingStrategy.get_route(from_sec_id, to_sec_id, vehicle_controller)` — 라우팅 | `next_sections` 기반 BFS 섹션 경로 탐색 |
-| `custom_idle_positioning_example.py` | `IdlePositioningStrategy.plan_reposition(oht, current_time, current_node, ...)` — 유휴 재배치 | 빈 버퍼가 있는 인접 섹션 중 혼잡도 최소인 곳으로 1-hop 이동 |
-| `custom_routing_cost_example.py` | `compute_cost(move_time, raw_penalty, effective_penalty, section, from_node, to_node, default_cost, context)` — 엣지 비용 (키워드 인자로 호출됨) | 기본식에 CURVE 1.15배 가중 + 고혼잡 노드 추가 페널티 |
+| `custom_assignment_example.py` | `AssignmentStrategy.select(target_section_id, idle_ohts, route_manager, bridge, vehicle_controller)` — assignment | OHT in the same section first → OHT with the lowest `bridge.estimate_section_route_cost()` → smallest section-id difference |
+| `custom_routing_example.py` | `RoutingStrategy.get_route(from_sec_id, to_sec_id, vehicle_controller)` — routing | BFS section route search over `next_sections` |
+| `custom_idle_positioning_example.py` | `IdlePositioningStrategy.plan_reposition(oht, current_time, current_node, ...)` — idle repositioning | 1-hop move to the least congested adjacent section that has a free buffer |
+| `custom_routing_cost_example.py` | `compute_cost(move_time, raw_penalty, effective_penalty, section, from_node, to_node, default_cost, context)` — edge cost (called with keyword arguments) | Default formula with a 1.15x weight on CURVE plus an extra penalty for highly congested nodes |
 
-## 사용 맥락
+## Usage context
 
-- 자기 전략은 `strategies/` 폴더에 두고 파일 이름만 넘기면 된다 (`strategies/README.md`). GUI 설정 또는 CLI(`--custom-assignment` / `--custom-routing` / `--custom-idle` / `--custom-routing-cost`)에서 전략 파일을 지정하면 `strategy_loader.load_strategy()`가 로드하고, `control/controllers.py`·`ufast/amhs.py`가 실행 중 호출한다.
-- 참고: 커스텀 routing_cost 함수가 설정되면 경로탐색 C 가속 엔진(`route/fast_pathfinder`)이 비활성화되고 순정 파이썬 경로로 폴백된다 — 전략 실험 시 실행 속도가 느려지는 것이 정상이다.
+- Put your own strategy in the `strategies/` folder and pass only the file name
+  (`strategies/README.md`). When a strategy file is specified in the GUI settings or on the CLI
+  (`--custom-assignment` / `--custom-routing` / `--custom-idle` / `--custom-routing-cost`),
+  `strategy_loader.load_strategy()` loads it and `control/controllers.py`·`ufast/amhs.py` call it
+  during the run.
+- Note: when a custom routing_cost function is set, the C-accelerated path-search engine
+  (`route/fast_pathfinder`) is disabled and the pure-Python path is used — a slower run during
+  strategy experiments is expected.

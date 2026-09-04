@@ -1,26 +1,26 @@
-# src/ufast/common — 공용 유틸리티
+# src/ufast/common — Shared utilities
 
-## 역할
+## Role
 
-U-FAST 전반에서 재사용되는 유틸리티 모음. 레이아웃/물류 입력 파일 파서(.dxf, .rail, FromTo), 시뮬레이션 KPI 수집·CSV 로깅, 커스텀 전략 플러그인 동적 로딩, 사후 검증 리포트 생성을 담당한다. 시뮬레이션 코어(`production`, `ufast`, `control`)와 GUI가 모두 이 폴더에 의존한다.
+A collection of utilities reused throughout U-FAST. It covers layout/logistics input file parsers (.dxf, .rail, FromTo), simulation KPI collection and CSV logging, dynamic loading of custom strategy plugins, and post-run verification reports. Both the simulation core (`production`, `ufast`, `control`) and the GUI depend on this folder.
 
-## 파일별 역할
+## Files
 
-| 파일 | 핵심 클래스/함수 | 역할 |
+| File | Key classes/functions | Role |
 |---|---|---|
-| `logger.py` | `SimulationLogger`, `get_logger()` | Lot·OHT·EQ 이벤트를 콜백으로 받아 누적하고, `save()`로 summary/lot/oht/eq/supply-delay CSV를 `kpi_mode`(logistics·production·both)와 `simulator_mode`에 따라 선택 저장 |
-| `equipment_kpi.py` | `open_starvation`, `close_starvation`, `record_equipment_downtime`, `collect_equipment_kpis` | 설비 starvation·breakdown·PM 구간 기록, 측정 윈도우 클리핑 후 family별/전체 KPI(평균·p95·max·censored·union downtime) 집계 |
-| `strategy_loader.py` | `load_strategy`, `invoke_*_strategy`, `normalize_*` | 사용자 `.py` 전략 파일을 4종 kind(`routing`/`assignment`/`idle_positioning`/`routing_cost`)로 동적 로드, 다양한 시그니처를 시도 호출 후 반환값을 표준 형식으로 정규화 |
-| `rail_format.py` | `parse_rail_file`, `RailData` | **`.rail` 공통 파서** (순수 stdlib) — 파일을 중립 레코드 구조로 파싱. `rail_io.py`와 `route/rail_parser.py`가 모두 이 결과를 소비 |
-| `rail_io.py` | `load_rail_file`, `save_rail_file` | `RailData` → 시각화용 `CLayer` + `SimulatorDataSet` Section/EQ 구축 (legacy 경로) |
-| `smat2022_to_rail.py` | `convert(smat_dir, out_rail, out_map)` | SMAT2022 CSV(`Adress/Rail/Equipment.csv`) → U-FAST `.rail` 변환기. 노드명 정수 ID 재매핑, junction-to-junction 섹션 병합, tool group당 대표 노드 선정 + 매핑 리포트 |
-| `dxf_parser.py` | `DXFParser.parse` | AutoCAD DXF → LINE/ARC/CIRCLE/TEXT/BLOCK을 `CLayer` 지오메트리로 변환 |
-| `fromto_parser.py` | `load_fromto(filepath)`, `generate_fixed_interval_events()` | 탭 구분 FromTo 파일 → `(from_eq, to_eq, rate)` 리스트 및 고정 간격(3600/rate 초) 이벤트 생성 |
-| `config_loader.py` | `ConfigLoader` (싱글턴) | `config/settings.json`에서 뷰어 외관 설정(색상·선 두께) 로드, 없으면 내장 기본값 |
+| `logger.py` | `SimulationLogger`, `get_logger()` | Accumulates Lot/OHT/EQ events received via callbacks; `save()` selectively writes summary/lot/oht/eq/supply-delay CSVs according to `kpi_mode` (logistics/production/both) and `simulator_mode` |
+| `equipment_kpi.py` | `open_starvation`, `close_starvation`, `record_equipment_downtime`, `collect_equipment_kpis` | Records equipment starvation/breakdown/PM intervals; after clipping to the measurement window, aggregates per-family and overall KPIs (mean, p95, max, censored, union downtime) |
+| `strategy_loader.py` | `load_strategy`, `invoke_*_strategy`, `normalize_*` | Dynamically loads user `.py` strategy files for 4 kinds (`routing`/`assignment`/`idle_positioning`/`routing_cost`), tries multiple call signatures, and normalizes return values to a standard form |
+| `rail_format.py` | `parse_rail_file`, `RailData` | **Common `.rail` parser** (pure stdlib) — parses the file into a neutral record structure. Both `rail_io.py` and `route/rail_parser.py` consume its output |
+| `rail_io.py` | `load_rail_file`, `save_rail_file` | `RailData` → `CLayer` for visualization + `SimulatorDataSet` Section/EQ construction (legacy path) |
+| `smat2022_to_rail.py` | `convert(smat_dir, out_rail, out_map)` | SMAT2022 CSV (`Adress/Rail/Equipment.csv`) → U-FAST `.rail` converter. Remaps node names to integer IDs, merges junction-to-junction sections, picks a representative node per tool group + mapping report |
+| `dxf_parser.py` | `DXFParser.parse` | AutoCAD DXF → converts LINE/ARC/CIRCLE/TEXT/BLOCK into `CLayer` geometry |
+| `fromto_parser.py` | `load_fromto(filepath)`, `generate_fixed_interval_events()` | Tab-separated FromTo file → list of `(from_eq, to_eq, rate)` and fixed-interval (3600/rate s) event generation |
+| `config_loader.py` | `ConfigLoader` (singleton) | Loads viewer appearance settings (colors, line widths) from `config/settings.json`, falling back to built-in defaults |
 
-## 사용 맥락
+## Usage context
 
-- `main_ui.py`: 파서 전체 + logger + strategy_loader 사용.
-- 생산 코어(`production/instance.py`, `events.py`)와 `integration/production_runner.py`: `equipment_kpi` 호출.
-- `control/controllers.py`, `ufast/amhs.py`: `strategy_loader`로 커스텀 전략 주입.
-- `tests/`의 KPI 테스트들이 이 모듈들을 직접 단위 테스트한다.
+- `main_ui.py`: uses all parsers + logger + strategy_loader.
+- The production core (`production/instance.py`, `events.py`) and `integration/production_runner.py`: call `equipment_kpi`.
+- `control/controllers.py`, `ufast/amhs.py`: inject custom strategies via `strategy_loader`.
+- The KPI tests under `tests/` unit-test these modules directly.

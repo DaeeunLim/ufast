@@ -57,7 +57,7 @@ class Machine:
         self.pm_intervals = []
         self.starvation_intervals = []
         self.starvation_open_since = None
-        # 가동률 시간예산의 측정창 clipping 용 — dispatch 시 (start, end) 기록.
+        # For clipping the utilisation time budget to the measurement window — (start, end) recorded at dispatch.
         self.busy_intervals = []
         self.setup_intervals = []
 

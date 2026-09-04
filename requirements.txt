@@ -1,10 +1,10 @@
-# ── 통합 시뮬레이터 의존성 ──────────────────────────────────
-# 물류(main_ui) + 생산(LogiFabSim) 공통
+# ── Integrated simulator dependencies ──────────────────────────
+# Shared by logistics (main_ui) + production (LogiFabSim)
 
-# GUI (물류 시뮬레이터 + 통합 UI)
+# GUI (logistics simulator + integrated UI)
 PyQt6
 
-# 생산 시뮬레이터 (LogiFabSim / PySCFabSim)
+# Production simulator (LogiFabSim / PySCFabSim)
 numpy
 pandas
 sortedcontainers
@@ -13,13 +13,13 @@ pytz
 six
 tzdata
 
-# 배치 실험/병렬 실행(선택) — 원본 LogiFabSim main.py 기능 유지용
+# Batch experiments / parallel execution (optional) — keeps the original LogiFabSim main.py features
 joblib
 tqdm
 
-# 참고:
-# - cffi / greenlet / hpy 는 PyPy 인터프리터 사용 시에만 필요하며
-#   일반 CPython 환경에서는 설치하지 않아도 됩니다.
+# Note:
+# - cffi / greenlet / hpy are only needed when using the PyPy interpreter;
+#   they do not need to be installed in a regular CPython environment.
 
-# 경로탐색 C 가속 (fast_pathfinder)
+# C-accelerated path search (fast_pathfinder)
 scipy

@@ -1,4 +1,4 @@
-"""ufast.common.fromto_parser 및 fixed-interval 이벤트 생성 단위 테스트."""
+"""Unit tests for ufast.common.fromto_parser and fixed-interval event generation."""
 import heapq
 import os
 import sys
@@ -102,7 +102,7 @@ if __name__ == '__main__':
 
 
 class TestFromtoBlockingEngine(unittest.TestCase):
-    """ufast-fromto 가 co-simulation 과 같은 AMHSExecutor(blocking) 로 도는지 스모크."""
+    """Smoke test that ufast-fromto runs on the same AMHSExecutor (blocking) as the co-simulation."""
 
     def test_run_fromto_smoke(self):
         import contextlib, io, json, os, tempfile
@@ -134,7 +134,7 @@ class TestFromtoBlockingEngine(unittest.TestCase):
 
 
 class TestCustomStrategyFlags(unittest.TestCase):
-    """--custom-routing-cost 배선과 strategies/ 폴더 이름 폴백."""
+    """--custom-routing-cost wiring and the strategies/ folder name fallback."""
 
     def test_routing_cost_plugin_and_strategies_lookup(self):
         import contextlib, io, json, os, shutil, tempfile
@@ -144,7 +144,8 @@ class TestCustomStrategyFlags(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         strat_dir = os.path.join(REPO_ROOT, 'strategies')
         os.makedirs(strat_dir, exist_ok=True)
-        tmp_name = '_test_cost_plugin.py'
+        import uuid
+        tmp_name = f'_test_cost_plugin_{uuid.uuid4().hex[:8]}.py'
         shutil.copy(root / 'examples' / 'custom_routing_cost_example.py',
                     os.path.join(strat_dir, tmp_name))
         try:

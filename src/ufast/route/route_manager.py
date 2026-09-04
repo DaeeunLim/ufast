@@ -1,10 +1,10 @@
 """
-route_manager.py - 통합 API
+route_manager.py - unified API
 
-Network, PathFinder, VehicleTracker를 조합한 고수준 인터페이스.
-Java RouteManager + Rail.cLARouteManger의 통합 사용 패턴을 제공한다.
+High-level interface combining Network, PathFinder, and VehicleTracker.
+Provides the combined usage pattern of the Java RouteManager + Rail.cLARouteManger.
 
-시뮬레이터의 EventHandler가 이 클래스를 통해 경로를 탐색한다.
+The simulator's EventHandler searches routes through this class.
 """
 
 from __future__ import annotations
@@ -19,21 +19,21 @@ from .logistics_logger import get_logistics_logger
 
 class RouteManager:
     """
-    AMHS 레일 네트워크 경로 관리자.
+    Route manager for the AMHS rail network.
 
-    Java의 RouteManager + Rail.cLARouteManger 패턴을 통합.
-    시뮬레이터에서의 사용 패턴:
+    Combines the Java RouteManager + Rail.cLARouteManger patterns.
+    Usage pattern in the simulator:
 
-        # 초기화
+        # Initialization
         rm = RouteManager()
         rm.load_from_rail("layout.rail")
         rm.initialize()
 
-        # 경로 탐색
+        # Route search
         path = rm.get_route("node_1", "node_100")
         path = rm.get_route_by_eq("EQ_A", "EQ_B")
 
-        # 차량 관리 (시뮬레이션용)
+        # Vehicle management (for simulation)
         rm.register_vehicle("OHT_1", "node_10")
         rm.assign_route("OHT_1", "node_100")
     """
@@ -43,20 +43,21 @@ class RouteManager:
         self.pathfinder: PathFinder = PathFinder(self.network)
         self.tracker: VehicleTracker = VehicleTracker(self.network)
 
-        # 설비간 비용 테이블 캐시
+        # Equipment-to-equipment cost table cache
         self._eq_cost_table: Optional[Dict[str, Tuple[float, float]]] = None
 
-        # 우회 제한 통계
+        # Detour limit statistics
         self._detour_fallback_count: int = 0
         self._total_route_count: int = 0
 
-        # 물류 로거 & 현재 시뮬레이션 시각 (외부에서 갱신)
+        # Logistics logger & current simulation time (updated externally)
         self._log = get_logistics_logger()
         self._sim_time: float = 0.0
 
-        # DISPATCH_PROBE/TRANSITION_PROBE는 내부 후보 평가용 반복 탐색이다.
-        # 대형 layout에서는 이 probe 로그가 수천~수만 행으로 커져 GUI 정지를 유발하므로 기본적으로 생략한다.
-        # 실제 배차/차량/최종 경로 기능은 유지된다.
+        # DISPATCH_PROBE/TRANSITION_PROBE are repeated internal searches for candidate evaluation.
+        # On large layouts these probe logs grow to thousands or tens of thousands of rows and
+        # freeze the GUI, so they are skipped by default.
+        # Actual assignment/vehicle/final-route functionality is unaffected.
         self.log_probe_pathfind: bool = False
 
     @property
@@ -66,16 +67,16 @@ class RouteManager:
     @sim_time.setter
     def sim_time(self, value: float):
         self._sim_time = value
-        # VehicleTracker의 시각도 동기화
+        # Keep the VehicleTracker time in sync
         self.tracker.sim_time = value
-        # Pathfinder 동적 캐시 TTL 판단을 위해 시각 동기화
+        # Sync the time so the PathFinder can judge its dynamic cache TTL
         self.pathfinder._sim_time = value
 
-    # ─── 초기화 ────────────────────────────────
+    # ─── Initialization ────────────────────────────
 
     def load_from_rail(self, filepath: str) -> Network:
         """
-        .rail 파일에서 네트워크 로드.
+        Load the network from a .rail file.
         Java: Rail.openRailFile() + Rail.initRouteManger()
         """
         parser = RailParser()
@@ -87,7 +88,7 @@ class RouteManager:
         return self.network
 
     def load_from_network(self, network: Network):
-        """이미 구축된 Network 객체 사용"""
+        """Use an already constructed Network object"""
         self.network = network
         self.pathfinder = PathFinder(self.network)
         self.tracker = VehicleTracker(self.network)
@@ -102,7 +103,7 @@ class RouteManager:
         vehicle_width: float = 1.0,
     ):
         """
-        네트워크 초기화 (이동 시간 계산).
+        Initialize the network (compute travel times).
         Java: Rail.initRouteManger()
         """
         self.pathfinder.initialize(
@@ -113,7 +114,7 @@ class RouteManager:
         )
 
     def set_custom_cost_function(self, cost_function):
-        """외부 routing cost function을 주입한다. None이면 기존 비용식 그대로 사용한다."""
+        """Inject an external routing cost function. None keeps the default cost formula."""
         self.pathfinder.set_custom_cost_function(cost_function)
 
     def configure_detour_limit(
@@ -123,28 +124,28 @@ class RouteManager:
         penalty_cap: float = 3.0,
     ):
         """
-        우회 제한 파라미터 설정 (A+B 방식).
+        Configure the detour limit parameters (A+B approach).
 
         Args:
-            max_detour_ratio: 정적 경로 대비 최대 우회 비율.
-                동적 경로의 노드 수가 정적 경로 * ratio를 넘으면
-                penalty를 무시한 정적 경로로 폴백한다.
-                0이면 비활성 (우회 무제한). 기본값 1.5.
-            penalty_weight: traffic_penalty 영향 비율 (0.0~1.0).
-                0.0이면 penalty 완전 무시, 1.0이면 원본 그대로.
-                기본값 0.5 (penalty 영향을 절반으로 감쇠).
-            penalty_cap: penalty 상한값.
-                raw_penalty가 아무리 높아도 effective penalty는
-                1 + weight * cap 을 넘지 않는다. 기본값 3.0.
+            max_detour_ratio: maximum detour ratio relative to the static route.
+                If the dynamic route's node count exceeds static route * ratio,
+                fall back to the static route that ignores penalties.
+                0 disables it (unlimited detours). Default 1.5.
+            penalty_weight: traffic_penalty influence ratio (0.0~1.0).
+                0.0 ignores penalties entirely, 1.0 uses them as-is.
+                Default 0.5 (halves the penalty influence).
+            penalty_cap: penalty upper bound.
+                However high raw_penalty is, the effective penalty never
+                exceeds 1 + weight * cap. Default 3.0.
 
-        예시:
-            # 보수적: 약간의 우회만 허용, penalty 영향 작게
+        Examples:
+            # Conservative: allow only slight detours, small penalty influence
             rm.configure_detour_limit(1.3, 0.3, 2.0)
 
-            # 관대: 우회를 넉넉히 허용, penalty 영향 크게
+            # Lenient: allow generous detours, large penalty influence
             rm.configure_detour_limit(2.0, 0.8, 5.0)
 
-            # 비활성: 기존 동작과 동일 (우회 제한 없음)
+            # Disabled: same as the previous behaviour (no detour limit)
             rm.configure_detour_limit(0, 1.0, 999)
         """
         self.pathfinder.max_detour_ratio = max_detour_ratio
@@ -152,7 +153,7 @@ class RouteManager:
         self.pathfinder.penalty_cap = penalty_cap
         self.pathfinder.clear_static_cache()
 
-    # ─── 경로 탐색 ────────────────────────────────
+    # ─── Route search ──────────────────────────────
 
     def get_route(
         self,
@@ -161,13 +162,13 @@ class RouteManager:
         context: str = "GENERAL",
     ) -> List[str]:
         """
-        노드 간 최단 경로 탐색 (우회 제한 적용).
+        Shortest route between nodes (with detour limiting).
 
-        max_detour_ratio가 설정되어 있으면 과도한 우회 시
-        정적 경로로 폴백한다. 폴백 빈도는 get_detour_stats()로 확인.
+        If max_detour_ratio is set, an excessive detour falls back to the
+        static route. Check the fallback frequency with get_detour_stats().
 
         Returns:
-            노드 이름 리스트. 경로 없으면 빈 리스트.
+            List of node names. Empty list if there is no route.
         """
         path, _ = self.get_route_with_cost(from_node, to_node, context=context)
         return path
@@ -178,12 +179,13 @@ class RouteManager:
         to_node: str,
         context: str = "GENERAL",
     ) -> Tuple[List[str], float]:
-        """경로와 이동 시간 반환"""
+        """Return the route and its travel time"""
         path, cost = self.pathfinder.path_search(from_node, to_node)
 
-        # ── 물류 로그 기록 ──
-        # 내부 probe 탐색은 기능 검증용 핵심 로그가 아니라 후보 평가용 반복 호출이다.
-        # 생략하지 않으면 대형 SMAT2022에서 path 문자열 생성/메모리 누적 자체가 주기적 멈춤을 만든다.
+        # ── Logistics log ──
+        # Internal probe searches are repeated calls for candidate evaluation, not core
+        # logs for functional verification. Unless skipped, on the large SMAT2022 layout the
+        # path string construction / memory accumulation alone causes periodic stalls.
         if self.log_probe_pathfind or not context.endswith("PROBE"):
             pf = self.pathfinder
             is_fallback = False
@@ -220,8 +222,8 @@ class RouteManager:
         to_eq: str,
     ) -> List[str]:
         """
-        설비 간 최단 경로 탐색.
-        설비명을 노드명으로 변환 후 경로 탐색.
+        Shortest route between two pieces of equipment.
+        Converts equipment names to node names, then searches the route.
         """
         from_node = self.network.eq_to_node.get(from_eq)
         to_node = self.network.eq_to_node.get(to_eq)
@@ -237,11 +239,11 @@ class RouteManager:
         to_eq: str,
     ) -> Tuple[float, float]:
         """
-        설비 간 이동 시간과 거리 반환.
-        캐시된 비용 테이블이 있으면 그것을 사용.
+        Return the travel time and distance between two pieces of equipment.
+        Uses the cached cost table if one exists.
 
         Returns:
-            (time, distance). 경로 없으면 (inf, inf).
+            (time, distance). (inf, inf) if there is no route.
         """
         from_node = self.network.eq_to_node.get(from_eq)
         to_node = self.network.eq_to_node.get(to_eq)
@@ -249,7 +251,7 @@ class RouteManager:
         if from_node is None or to_node is None:
             return (float('inf'), float('inf'))
 
-        # 캐시된 테이블 확인
+        # Check the cached table
         if self._eq_cost_table:
             key = f"{from_node}_{to_node}"
             if key in self._eq_cost_table:
@@ -258,35 +260,35 @@ class RouteManager:
         _, cost = self.pathfinder.path_search(from_node, to_node)
         if cost < 0:
             return (float('inf'), float('inf'))
-        return (cost, 0.0)  # distance는 별도 계산 필요
+        return (cost, 0.0)  # distance must be computed separately
 
-    # ─── 비용 테이블 ────────────────────────────────
+    # ─── Cost table ────────────────────────────────
 
     def build_eq_cost_table(
         self,
         eq_names: Optional[List[str]] = None,
     ) -> Dict[str, Tuple[float, float]]:
         """
-        설비 간 비용 테이블 생성 및 캐시.
+        Build and cache the equipment-to-equipment cost table.
         Java: Rail.makeFromToCostTable()
         """
         self._eq_cost_table = self.pathfinder.build_eq_cost_table(eq_names)
         return self._eq_cost_table
 
-    # ─── 경로 변환 ────────────────────────────────
+    # ─── Route conversion ──────────────────────────
 
     def node_path_to_section_path(self, node_path: List[str]) -> List[str]:
         """
-        노드 경로를 섹션 경로로 변환.
+        Convert a node path into a section path.
 
-        연속된 두 노드(cur, next)를 모두 포함하는 섹션만 선택한다.
-        분기점 노드가 여러 섹션에 속할 때 잘못된 섹션이 끼어드는 문제를 방지.
+        Selects only the sections that contain both consecutive nodes (cur, next).
+        Prevents a wrong section from slipping in when a branch-point node belongs to several sections.
 
         Args:
-            node_path: 노드 이름 리스트
+            node_path: list of node names
 
         Returns:
-            섹션 이름 리스트 (중복 제거, 순서 유지)
+            List of section names (deduplicated, order preserved)
         """
         if not node_path:
             return []
@@ -303,26 +305,26 @@ class RouteManager:
             if cur_node is None or next_node is None:
                 continue
 
-            # 두 노드가 공통으로 속한 섹션만 선택
+            # Select only the sections shared by both nodes
             cur_secs  = set(cur_node.section_list)
             next_secs = set(next_node.section_list)
             common    = cur_secs & next_secs
 
-            for sec_name in cur_node.section_list:   # 순서 유지를 위해 cur 기준 순회
+            for sec_name in cur_node.section_list:   # iterate over cur to preserve order
                 if sec_name in common and sec_name not in seen:
                     section_path.append(sec_name)
                     seen.add(sec_name)
 
         return section_path
 
-    # ─── 차량 관리 (시뮬레이션용) ────────────────────
+    # ─── Vehicle management (for simulation) ────────
 
     def register_vehicle(
         self,
         name: str,
         node_name: Optional[str] = None,
     ) -> VehicleState:
-        """차량 등록"""
+        """Register a vehicle"""
         state = self.tracker.register_vehicle(name, node_name)
         self._log.log_vehicle_register(self.sim_time, name, node_name or "")
         return state
@@ -333,10 +335,10 @@ class RouteManager:
         to_node: str,
     ) -> List[str]:
         """
-        차량에 목적지까지의 경로 할당.
+        Assign a route to the destination to a vehicle.
 
         Returns:
-            할당된 경로. 경로 없으면 빈 리스트.
+            The assigned route. Empty list if there is no route.
         """
         vehicle = self.tracker.vehicles.get(vehicle_name)
         if vehicle is None or vehicle.current_node is None:
@@ -345,7 +347,7 @@ class RouteManager:
         from_node = vehicle.current_node
         path = self.get_route(from_node, to_node)
         if path:
-            # IDLE → ASSIGNED 전환 전에 IDLE 시간 누적
+            # Accumulate IDLE time before the IDLE → ASSIGNED transition
             idle_elapsed = self.tracker.flush_idle_time(vehicle_name)
 
             self.tracker.set_path(vehicle_name, path)
@@ -357,14 +359,14 @@ class RouteManager:
         return path
 
     def move_vehicle(self, vehicle_name: str) -> bool:
-        """차량을 경로상 다음 노드로 이동"""
+        """Move the vehicle to the next node on its route"""
         vehicle = self.tracker.vehicles.get(vehicle_name)
         from_node = vehicle.current_node if vehicle else ""
         next_node = vehicle.next_node if vehicle else ""
 
         success = self.tracker.move_vehicle(vehicle_name)
 
-        # ── 이동 로그 ──
+        # ── Move log ──
         blocked_by = None
         if not success and next_node:
             blocked_by = self.tracker.node_occupancy.get(next_node)
@@ -376,28 +378,28 @@ class RouteManager:
         return success
 
     def can_move_vehicle(self, vehicle_name: str) -> bool:
-        """차량이 다음 노드로 이동 가능한지 확인"""
+        """Check whether the vehicle can move to the next node"""
         return self.tracker.can_move(vehicle_name)
 
     def detect_deadlock(self) -> List[List[str]]:
-        """데드락 탐지"""
+        """Deadlock detection"""
         cycles = self.tracker.detect_deadlock()
         if cycles:
             self._log.log_deadlock(self.sim_time, cycles)
         return cycles
 
-    # ─── 우회 제한 통계 ────────────────────────────
+    # ─── Detour limit statistics ───────────────────
 
     def get_detour_stats(self) -> Dict[str, any]:
         """
-        우회 제한 통계 반환.
+        Return the detour limit statistics.
 
         Returns:
             {
-                'total_searches': 전체 경로 탐색 횟수,
-                'fallback_count': 정적 경로로 폴백된 횟수,
-                'fallback_ratio': 폴백 비율 (0.0 ~ 1.0),
-                'settings': 현재 우회 제한 설정,
+                'total_searches': total number of route searches,
+                'fallback_count': number of fallbacks to the static route,
+                'fallback_ratio': fallback ratio (0.0 ~ 1.0),
+                'settings': current detour limit settings,
             }
         """
         pf = self.pathfinder
@@ -415,7 +417,7 @@ class RouteManager:
         }
 
     def reset_detour_stats(self):
-        """우회 제한 통계 초기화"""
+        """Reset the detour limit statistics"""
         self.pathfinder.total_search_count = 0
         self.pathfinder.detour_fallback_count = 0
 
@@ -428,15 +430,15 @@ class RouteManager:
         top_k: int = 3,
     ) -> Dict[str, str]:
         """
-        IDLE 차량들에게 이동할 한산한 목적지 노드를 추천.
+        Recommend quiet destination nodes for IDLE vehicles to move to.
 
-        traffic_penalty 기준으로 전체 네트워크에서 혼잡도가 낮은 노드를
-        찾아 각 차량에 배정한다. 같은 노드를 두 차량에 중복 배정하지 않는다.
+        Finds the least congested nodes in the whole network by traffic_penalty
+        and assigns one to each vehicle. The same node is never assigned to two vehicles.
 
         Args:
-            idle_vehicle_names: 대상 차량 목록. None이면 전체 IDLE 차량.
-            sample_nodes: 후보 노드 풀. None이면 전체 사용 가능 노드.
-            top_k: 차량 1대당 후보 배수. 차량 수 * top_k 개의 후보를 확보.
+            idle_vehicle_names: target vehicles. None means every IDLE vehicle.
+            sample_nodes: candidate node pool. None means every usable node.
+            top_k: candidate multiplier per vehicle. Secures vehicle count * top_k candidates.
 
         Returns:
             {vehicle_name: target_node_name}
@@ -478,13 +480,13 @@ class RouteManager:
         top_k: int = 3,
     ) -> Dict[str, List[str]]:
         """
-        IDLE 차량들을 한산한 구간으로 재배치.
+        Reposition IDLE vehicles to quiet areas.
 
-        simulation_step의 빈 틈에서 호출.
-        배차 요청이 없을 때만 실행하도록 호출부에서 조건 처리 필요.
+        Called in the idle gaps of simulation_step.
+        The caller must ensure it only runs when there are no pending transport requests.
 
         Returns:
-            {vehicle_name: assigned_path} — 경로 할당된 차량만 포함
+            {vehicle_name: assigned_path} — only vehicles that received a route
         """
         targets = self.get_idle_reposition_targets(
             idle_vehicle_names, top_k=top_k
@@ -501,7 +503,7 @@ class RouteManager:
             if not path:
                 continue
 
-            # IDLE → REPOSITIONING 전환 전에 IDLE 시간 누적
+            # Accumulate IDLE time before the IDLE → REPOSITIONING transition
             idle_elapsed = self.tracker.flush_idle_time(veh_name)
 
             self.tracker.set_path(veh_name, path)
@@ -526,14 +528,14 @@ class RouteManager:
         self.tracker.reset_runtime_state()
         self.tracker.sim_time = self.sim_time
 
-    # ─── 정보 조회 ────────────────────────────────
+    # ─── Lookups ───────────────────────────────────
 
     def get_eq_node(self, eq_name: str) -> Optional[str]:
-        """설비명에 대응하는 노드명 반환"""
+        """Return the node name corresponding to an equipment name"""
         return self.network.eq_to_node.get(eq_name)
 
     def get_node_eq(self, node_name: str) -> Optional[str]:
-        """노드명에 대응하는 설비명 반환"""
+        """Return the equipment name corresponding to a node name"""
         return self.network.node_to_eq.get(node_name)
 
     def __repr__(self) -> str:

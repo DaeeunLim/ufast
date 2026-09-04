@@ -1,14 +1,14 @@
 """
-dispatcher.py - OHT 디스패칭 (배차 전략)
+dispatcher.py - OHT dispatching (assignment strategies)
 
-이송 요청 발생 시 어떤 OHT를 배차할지 결정하는 전략 모듈.
-전략 패턴으로 구현하여 교체 가능하게 한다.
+Strategy module that decides which OHT to assign when a transport request arrives.
+Implemented with the strategy pattern so the policy can be swapped.
 
-사용 패턴:
+Usage pattern:
     dispatcher = Dispatcher(route_manager, bridge)
-    dispatcher.strategy = NearestIdleStrategy()  # 기본
-    # 또는
-    dispatcher.strategy = CostBasedStrategy()    # 비용 기반
+    dispatcher.strategy = NearestIdleStrategy()  # default
+    # or
+    dispatcher.strategy = CostBasedStrategy()    # cost based
 
     oht_name = dispatcher.dispatch(from_section_id, oht_dict)
 """
@@ -26,14 +26,14 @@ from .logistics_logger import get_logistics_logger
 
 
 class OHTInfo(Protocol):
-    """OHT 객체가 만족해야 하는 인터페이스 (duck typing)"""
+    """Interface an OHT object must satisfy (duck typing)"""
     name: str
     status: str
     current_section_id: int
 
 
 class DispatchStrategy(ABC):
-    """디스패칭 전략 인터페이스"""
+    """Dispatching strategy interface"""
 
     @abstractmethod
     def select(
@@ -44,16 +44,16 @@ class DispatchStrategy(ABC):
         bridge: SectionNodeBridge,
     ) -> Optional[str]:
         """
-        배차할 OHT 선택.
+        Select the OHT to assign.
 
         Args:
-            target_section_id: 이송 요청이 발생한 섹션 ID (from_eq가 있는 곳)
-            idle_ohts: IDLE 상태의 OHT 목록
-            route_manager: 경로 탐색기
-            bridge: 섹션↔노드 브릿지
+            target_section_id: section ID where the transport request originated (location of from_eq)
+            idle_ohts: list of OHTs in IDLE status
+            route_manager: route finder
+            bridge: section ↔ node bridge
 
         Returns:
-            선택된 OHT의 이름. 배차 불가능하면 None.
+            Name of the selected OHT, or None if no assignment is possible.
         """
         ...
 
@@ -63,11 +63,12 @@ class DispatchStrategy(ABC):
 
 def _estimate_section_graph_cost(bridge: SectionNodeBridge, from_sec_id: int, to_sec_id: int) -> float:
     """
-    RouteManager/bridge 노드 경로가 실패할 때 사용하는 섹션 그래프 기반 보조 비용.
+    Auxiliary cost based on the section graph, used when the RouteManager/bridge node route fails.
 
-    기존 route 패키지의 cost 구조는 그대로 두고, 배차 후보 평가에서만 fallback으로 사용한다.
-    이 fallback이 없으면 bridge.estimate_section_route_cost()가 실패한 후보들이 모두 동일하게
-    탈락하고, 결과적으로 idle_ohts[0]만 반복 선택되는 편향이 생길 수 있다.
+    Leaves the existing cost structure of the route package untouched; used only as a fallback
+    when evaluating assignment candidates. Without this fallback, every candidate for which
+    bridge.estimate_section_route_cost() fails is dropped identically, which can bias the
+    result toward repeatedly selecting idle_ohts[0].
     """
     if from_sec_id == to_sec_id:
         return 0.0
@@ -120,14 +121,14 @@ def _estimate_section_graph_cost(bridge: SectionNodeBridge, from_sec_id: int, to
 
 class NearestIdleStrategy(DispatchStrategy):
     """
-    가장 가까운 IDLE OHT 배차 (기본 전략).
+    Assign the nearest IDLE OHT (default strategy).
 
-    1순위: 같은 섹션의 IDLE OHT
-    2순위: 전체 IDLE OHT 중 경로 비용이 가장 낮은 OHT
+    Priority 1: an IDLE OHT in the same section
+    Priority 2: the IDLE OHT with the lowest route cost among all IDLE OHTs
 
-    기존 VehicleController.assign_oht()를 개선한 버전.
-    기존은 "아무 IDLE OHT"를 반환했지만,
-    이 전략은 경로 비용을 기준으로 가장 가까운 OHT를 선택한다.
+    An improved version of the former VehicleController.assign_oht().
+    The old version returned "any IDLE OHT", whereas this strategy
+    selects the nearest OHT by route cost.
     """
 
     def select(
@@ -140,7 +141,7 @@ class NearestIdleStrategy(DispatchStrategy):
         if not idle_ohts:
             return None
 
-        # 1순위: 같은 섹션
+        # Priority 1: same section
         same_section = [
             oht for oht in idle_ohts
             if oht.current_section_id == target_section_id
@@ -148,7 +149,7 @@ class NearestIdleStrategy(DispatchStrategy):
         if same_section:
             return same_section[0].name
 
-        # 2순위: 실제 section route 기준 비용 평가
+        # Priority 2: evaluate cost using the actual section route
         best_oht: Optional[str] = None
         best_cost = float('inf')
 
@@ -159,9 +160,9 @@ class NearestIdleStrategy(DispatchStrategy):
                 context="DISPATCH_PROBE",
             )
 
-            # bridge/node 기반 비용 산정이 실패하면 기존 simulator section graph로 보조 평가한다.
-            # 이렇게 해야 일부 OHT만 반복 선택되는 현상을 막고, 현재 존재하는 IDLE OHT 전체가
-            # 배차 후보로 정상 비교된다.
+            # If the bridge/node-based cost estimate fails, fall back to the simulator's section graph.
+            # This prevents only a few OHTs from being selected repeatedly and ensures all currently
+            # IDLE OHTs are properly compared as assignment candidates.
             if cost < 0:
                 cost = _estimate_section_graph_cost(
                     bridge, oht.current_section_id, target_section_id
@@ -171,7 +172,7 @@ class NearestIdleStrategy(DispatchStrategy):
                 best_cost = cost
                 best_oht = oht.name
 
-        # 모든 비용 평가가 실패한 경우에만 기존 동작처럼 첫 IDLE OHT로 폴백한다.
+        # Only if every cost evaluation failed, fall back to the first IDLE OHT as before.
         if best_oht is None and idle_ohts:
             return idle_ohts[0].name
 
@@ -180,9 +181,9 @@ class NearestIdleStrategy(DispatchStrategy):
 
 class SameSectionFirstStrategy(DispatchStrategy):
     """
-    기존 VehicleController.assign_oht()와 동일한 단순 전략.
-    1) 같은 섹션의 IDLE OHT
-    2) 아무 IDLE OHT
+    Simple strategy identical to the former VehicleController.assign_oht().
+    1) an IDLE OHT in the same section
+    2) any IDLE OHT
     """
 
     def select(
@@ -204,13 +205,13 @@ class SameSectionFirstStrategy(DispatchStrategy):
 
 class CongestionAwareStrategy(DispatchStrategy):
     """
-    혼잡도 인식 배차 전략.
+    Congestion-aware assignment strategy.
 
-    경로 비용뿐만 아니라, 경로상 섹션의 혼잡도를 고려한다.
-    혼잡한 경로를 통과해야 하는 OHT보다
-    한적한 경로의 OHT를 우선 선택한다.
+    Considers not only the route cost but also the congestion of the sections
+    along the route. An OHT with a quiet route is preferred over one that
+    would have to travel through congested sections.
 
-    score = route_cost + congestion_weight * 총_경로_혼잡도
+    score = route_cost + congestion_weight * total_route_congestion
     """
 
     def __init__(self, congestion_weight: float = 2.0):
@@ -226,7 +227,7 @@ class CongestionAwareStrategy(DispatchStrategy):
         if not idle_ohts:
             return None
 
-        # 같은 섹션 우선
+        # Same section first
         same_section = [
             oht for oht in idle_ohts
             if oht.current_section_id == target_section_id
@@ -251,7 +252,7 @@ class CongestionAwareStrategy(DispatchStrategy):
             if cost == float('inf'):
                 continue
 
-            # 경로상 혼잡도 합산
+            # Sum the congestion along the route
             congestion = sum(
                 bridge.get_section_congestion(sid)
                 for sid in sec_path
@@ -271,17 +272,17 @@ class CongestionAwareStrategy(DispatchStrategy):
 
 class Dispatcher:
     """
-    OHT 디스패처.
+    OHT dispatcher.
 
-    전략 패턴으로 배차 알고리즘을 교체할 수 있다.
+    The assignment algorithm can be swapped via the strategy pattern.
 
     Usage:
         dispatcher = Dispatcher(route_manager, bridge)
 
-        # 전략 변경
+        # Change strategy
         dispatcher.strategy = CongestionAwareStrategy(congestion_weight=3.0)
 
-        # 배차
+        # Assign
         oht_name = dispatcher.dispatch(target_sec_id, oht_dict)
     """
 
@@ -296,7 +297,7 @@ class Dispatcher:
         self.strategy: DispatchStrategy = strategy or NearestIdleStrategy()
         self._log = get_logistics_logger()
 
-        # 통계
+        # Statistics
         self.total_dispatches: int = 0
         self.failed_dispatches: int = 0
         self.same_section_dispatches: int = 0
@@ -307,18 +308,18 @@ class Dispatcher:
         oht_dict: Dict[str, OHTInfo],
     ) -> Optional[str]:
         """
-        이송 요청에 대해 배차할 OHT를 선택.
+        Select the OHT to assign for a transport request.
 
         Args:
-            target_section_id: from_eq가 있는 섹션 ID
-            oht_dict: {oht_name: OHT} 전체 OHT 딕셔너리
+            target_section_id: section ID where from_eq is located
+            oht_dict: {oht_name: OHT} dictionary of all OHTs
 
         Returns:
-            선택된 OHT 이름. 배차 불가능하면 None.
+            Name of the selected OHT, or None if no assignment is possible.
         """
         self.total_dispatches += 1
 
-        # IDLE OHT 필터링
+        # Filter IDLE OHTs
         idle_ohts = [
             oht for oht in oht_dict.values()
             if oht.status == "IDLE"
@@ -342,7 +343,7 @@ class Dispatcher:
             self.rm, self.bridge,
         )
 
-        # ── 통계 갱신 + 사유 판단 ──
+        # ── Update statistics + determine the reason ──
         reason = ""
         if selected is None:
             self.failed_dispatches += 1
@@ -356,7 +357,7 @@ class Dispatcher:
         else:
             reason = "NEAREST_COST"
 
-        # ── 물류 로그 ──
+        # ── Logistics log ──
         self._log.log_dispatch(
             sim_time=self.rm.sim_time,
             target_section_id=target_section_id,
@@ -370,7 +371,7 @@ class Dispatcher:
         return selected
 
     def get_stats(self) -> Dict[str, any]:
-        """배차 통계"""
+        """Assignment statistics"""
         return {
             'total': self.total_dispatches,
             'failed': self.failed_dispatches,

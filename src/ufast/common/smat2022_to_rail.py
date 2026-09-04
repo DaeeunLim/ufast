@@ -1,32 +1,32 @@
 """
-smat2022_to_rail.py — SMAT2022 CSV → U-FAST .rail 변환기 (legacy 호환).
+smat2022_to_rail.py — SMAT2022 CSV → U-FAST .rail converter (legacy-compatible).
 
-SMAT2022 레이아웃 데이터를 U-FAST 가 읽는 .rail 포맷으로 변환.
-legacy common/rail_io.py 와 신규 route/rail_parser.py 가 모두 읽을 수 있는
-공통 포맷으로 출력한다.
+Converts SMAT2022 layout data into the .rail format read by U-FAST.
+Outputs a common format readable by both the legacy common/rail_io.py
+and the new route/rail_parser.py.
 
-입력 (SMAT2022/):
-  Adress.csv     레일 노드 좌표
-  Rail.csv       레일 링크 (방향성 FROM→TO)
-  Equipment.csv  장비 → tool group, 좌표 (쉼표 소수점)
+Input (SMAT2022/):
+  Adress.csv     rail node coordinates
+  Rail.csv       rail links (directed FROM→TO)
+  Equipment.csv  equipment → tool group, coordinates (comma decimal separator)
 
-출력:
+Output:
   *.rail                  RAILDATA / SCALE / NODE / LINK / RAILLIST /
                           EQTONODEMAP / TEXT
-  *_family_node_map.csv   tool group → 대표 노드 매핑 리포트
+  *_family_node_map.csv   tool group → representative node mapping report
 
-설계 메모:
-  - 노드 이름을 **정수 ID (1..N)** 로 재매핑.
-    legacy rail_io.py 는 NODE id 를 int() 로 파싱하므로 필수.
-    route.rail_parser 는 string 노드명도 받아들이므로 정수 string 도 호환.
-  - LINK / EQTONODEMAP / RAILLIST 모두 정수 ID 사용.
-  - RAILLIST 는 (geometry + length) 포함 — legacy 가 Section 객체 생성에 사용.
-  - TEXT 는 EQ 마커 좌표 — legacy 시각화용.
-  - bridge.build_mapping 의 `int(sec_name)` 요건은 sec_id 가 1..M 이라 자동 충족.
-  - EQTONODEMAP 은 granularity (i): tool group 당 대표 노드 1개.
-    규칙 (a): 해당 tool group 소속 장비들의 중심 좌표에 가장 가까운 레일 노드.
-  - Port.csv 는 EQP_NAME 이 대부분 비어 있어(22120 중 17760 공란) 사용하지 않음.
-  - Equipment.csv 좌표와 Adress.csv 좌표는 동일 좌표계임을 확인함.
+Design notes:
+  - Node names are remapped to **integer IDs (1..N)**.
+    Required because legacy rail_io.py parses NODE ids with int().
+    route.rail_parser also accepts string node names, so integer strings are compatible.
+  - LINK / EQTONODEMAP / RAILLIST all use integer IDs.
+  - RAILLIST includes (geometry + length) — used by legacy code to create Section objects.
+  - TEXT holds EQ marker coordinates — for legacy visualization.
+  - The `int(sec_name)` requirement of bridge.build_mapping is met automatically since sec_id is 1..M.
+  - EQTONODEMAP uses granularity (i): one representative node per tool group.
+    Rule (a): the rail node closest to the centroid of the equipment in that tool group.
+  - Port.csv is not used because EQP_NAME is mostly empty (17760 of 22120 blank).
+  - Equipment.csv and Adress.csv coordinates were confirmed to share the same coordinate system.
 """
 from __future__ import annotations
 import csv
@@ -36,30 +36,30 @@ from typing import Dict, List, Optional, Tuple
 
 
 def _num(s: Optional[str]) -> Optional[float]:
-    """쉼표 소수점(2090,688)을 처리하는 float 변환."""
+    """float conversion that handles comma decimal separators (2090,688)."""
     if s is None or s == '':
         return None
     return float(s.replace(',', '.'))
 
 
 def _read_tsv(path: str) -> List[dict]:
-    """BOM 포함 탭 구분 CSV 읽기."""
+    """Read a tab-separated CSV that may include a BOM."""
     with open(path, encoding='utf-8-sig') as f:
         return list(csv.DictReader(f, delimiter='\t'))
 
 
 def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict:
     """
-    SMAT2022 디렉터리를 .rail 파일(legacy 호환)로 변환한다.
+    Convert a SMAT2022 directory into a .rail file (legacy-compatible).
 
     Returns:
-        통계 dict (nodes, links, tool_groups, ...)
+        statistics dict (nodes, links, tool_groups, ...)
     """
     nodes = _read_tsv(os.path.join(smat_dir, 'Adress.csv'))
     rails = _read_tsv(os.path.join(smat_dir, 'Rail.csv'))
     equips = _read_tsv(os.path.join(smat_dir, 'Equipment.csv'))
 
-    # ── 노드: 이름 → 정수 ID(1..N) + 좌표 ──
+    # ── Nodes: name → integer ID (1..N) + coordinates ──
     node_id_by_name: Dict[str, int] = {}
     node_xy: Dict[str, Tuple[float, float]] = {}
     node_rows: List[Tuple[str, int, float, float]] = []  # (name, id, x, y)
@@ -70,7 +70,7 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
         node_xy[nm] = (x, y)
         node_rows.append((nm, i, x, y))
 
-    # ── tool group 별 장비 좌표 ──
+    # ── Equipment coordinates per tool group ──
     group_eq: Dict[str, List[Tuple[float, float]]] = {}
     for r in equips:
         g = r['TOOL_GROUP']
@@ -79,7 +79,7 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
             continue
         group_eq.setdefault(g, []).append((x, y))
 
-    # ── tool group 대표 노드 (규칙 a) ──
+    # ── Representative node per tool group (rule a) ──
     name_xy_list = list(node_xy.items())
 
     def nearest_node(cx: float, cy: float) -> Tuple[str, float]:
@@ -90,7 +90,7 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
                 bd, best = d, nm
         return best, math.sqrt(bd)
 
-    group_node: Dict[str, str] = {}     # family → 대표 노드 이름(원본)
+    group_node: Dict[str, str] = {}     # family → representative node name (original)
     map_report: List[dict] = []
     for g in sorted(group_eq):
         pts = group_eq[g]
@@ -108,20 +108,21 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
             dist=round(dist, 1),
         ))
 
-    # ── .rail 작성 ──
+    # ── Write .rail ──
     xs = [x for _, _, x, _ in node_rows]
     ys = [y for _, _, _, y in node_rows]
     lines: List[str] = ['RAILDATA']
     lines.append(f"SCALE\t{min(xs)}\t{max(xs)}\t{min(ys)}\t{max(ys)}")
 
-    # NODE — 정수 ID
+    # NODE — integer IDs
     for _, nid, x, y in node_rows:
         lines.append(f"NODE\t{nid}\t{x}\t{y}")
 
-    # ── LINK + RAILLIST — junction-to-junction 섹션 병합 ──
-    # 섹션 정의: 합류/분기점(진입≠1 또는 진출≠1인 노드)에서 다음 합류/분기점까지의
-    # junction-free 구간. 내부 노드는 in=out=1. 같은 섹션의 링크들은 sec_id 를
-    # 공유하며, 주행 방향(FROM→TO) 순서로 기록된다 (엔진이 node_list 순서를 따름).
+    # ── LINK + RAILLIST — junction-to-junction section merging ──
+    # Section definition: the junction-free stretch from a merge/branch point (a node with
+    # in-degree≠1 or out-degree≠1) to the next one. Interior nodes have in=out=1. Links of
+    # the same section share a sec_id and are written in travel order (FROM→TO), since the
+    # engine follows the node_list order.
     skipped = 0
     valid_rails = []
     for r in rails:
@@ -144,7 +145,7 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
     visited: set = set()
 
     def _walk_chain(start_rail: dict) -> List[dict]:
-        """start_rail 부터 다음 junction 까지 rail 을 이어붙인다."""
+        """Chain rails from start_rail up to the next junction."""
         chain = [start_rail]
         visited.add(id(start_rail))
         cur = start_rail['TO_NODE']
@@ -152,7 +153,7 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
             nxt_list = [x for x in rails_by_from.get(cur, [])
                         if id(x) not in visited]
             if len(nxt_list) != 1:
-                break  # 방문 완료(루프 복귀) 또는 데이터 이상
+                break  # already visited (loop closed) or data anomaly
             nxt = nxt_list[0]
             chain.append(nxt)
             visited.add(id(nxt))
@@ -160,11 +161,11 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
         return chain
 
     chains: List[List[dict]] = []
-    # 1차: junction 에서 출발하는 체인
+    # Pass 1: chains starting at a junction
     for r in valid_rails:
         if id(r) not in visited and _is_junction(r['FROM_NODE']):
             chains.append(_walk_chain(r))
-    # 2차: junction 없는 고립 루프 — 임의 지점에서 절단
+    # Pass 2: isolated loops without a junction — cut at an arbitrary point
     for r in valid_rails:
         if id(r) not in visited:
             chains.append(_walk_chain(r))
@@ -181,18 +182,18 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
             angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
 
             lines.append(f"LINK\t{sec_id}\t{rail_type}\t{fn_id}\t{tn_id}")
-            # RAILLIST: name type from to x1 y1 x2 y2 angle length  (length 는 마지막)
+            # RAILLIST: name type from to x1 y1 x2 y2 angle length  (length is last)
             lines.append(
                 f"RAILLIST\t{sec_id}\t{rail_type}\t{fn_id}\t{tn_id}\t"
                 f"{x1}\t{y1}\t{x2}\t{y2}\t{angle:.4f}\t{length:.4f}"
             )
 
-    # EQTONODEMAP — 정수 노드 ID
+    # EQTONODEMAP — integer node IDs
     for g in sorted(group_node):
         rep_name = group_node[g]
         lines.append(f"EQTONODEMAP\t{g}\t{node_id_by_name[rep_name]}")
 
-    # TEXT — EQ 마커 좌표 (legacy 시각화)
+    # TEXT — EQ marker coordinates (legacy visualization)
     for g in sorted(group_node):
         rep_name = group_node[g]
         x, y = node_xy[rep_name]
@@ -201,14 +202,14 @@ def convert(smat_dir: str, out_rail: str, out_map: Optional[str] = None) -> dict
     with open(out_rail, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
 
-    # ── 매핑 리포트 ──
+    # ── Mapping report ──
     if out_map and map_report:
         with open(out_map, 'w', encoding='utf-8', newline='') as f:
             w = csv.DictWriter(f, fieldnames=list(map_report[0].keys()))
             w.writeheader()
             w.writerows(map_report)
 
-    # ── 통계 ──
+    # ── Statistics ──
     dists = [m['dist'] for m in map_report]
     return dict(
         nodes=len(node_rows),
@@ -230,10 +231,10 @@ if __name__ == '__main__':
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(DATASET_DIR, 'SMAT2022.rail')
     mp = os.path.splitext(out)[0] + '_family_node_map.csv'
     res = convert(smat, out, mp)
-    print("[smat2022_to_rail] 변환 완료 (legacy 호환 포맷)")
-    print(f"  노드 {res['nodes']} / 링크 {res['links']}"
+    print("[smat2022_to_rail] Conversion complete (legacy-compatible format)")
+    print(f"  nodes {res['nodes']} / links {res['links']}"
           + (f" (skipped {res['skipped_links']})" if res['skipped_links'] else "")
           + f" / tool group {res['tool_groups']}")
-    print(f"  대표노드 거리 mm: min {res['dist_min']} / avg {res['dist_avg']} / max {res['dist_max']}")
+    print(f"  representative-node distance mm: min {res['dist_min']} / avg {res['dist_avg']} / max {res['dist_max']}")
     print(f"  → {res['out_rail']}")
     print(f"  → {res['out_map']}")

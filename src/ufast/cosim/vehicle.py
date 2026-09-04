@@ -1,15 +1,16 @@
 """
-ufast/cosim/vehicle.py — OHT 차량 제원 (VehicleSpec).
+ufast/cosim/vehicle.py — OHT vehicle specification (VehicleSpec).
 
-속도·가감속·차량 길이·최소 차간거리·링크 제한속도를 한 객체로 묶는다.
-우선순위: CLI 플래그 > `--vehicle-spec` 파일 > 기본 파일(dataset/vehicle_spec.json)
-> 내장 기본값. 기본 파일의 값은 SMAT2022 OHTV0 (VehicleType.csv) 와 같다.
+Bundles speed, acceleration/deceleration, vehicle length, minimum headway and link
+speed limits into one object. Priority: CLI flags > `--vehicle-spec` file > default
+file (dataset/vehicle_spec.json) > built-in defaults. The values in the default
+file match SMAT2022 OHTV0 (VehicleType.csv).
 
-내부 단위는 레일 파일과 같은 mm / mm/s / mm/s² 이다. CLI 플래그는 사람이 읽기
-쉬운 단위(속도 m/s, 가감속 m/s², 길이 mm)로 받아 여기서 변환한다.
+Internal units are mm / mm/s / mm/s², the same as the rail file. CLI flags take
+human-readable units (speed m/s, acceleration m/s², length mm) and are converted here.
 
-두 실행 모드(co-simulation `ufast-run`, logistics-only `ufast-fromto`)가 같은
-객체를 쓰고, 값 전체가 결과 JSON 의 meta['vehicle'] 에 기록된다.
+Both run modes (co-simulation `ufast-run`, logistics-only `ufast-fromto`) use the
+same object, and all values are recorded in the result JSON under meta['vehicle'].
 """
 from __future__ import annotations
 import csv
@@ -25,18 +26,18 @@ DEFAULT_SPEC_FILE = os.path.join(DATASET_DIR, 'vehicle_spec.json')
 
 @dataclass(frozen=True)
 class VehicleSpec:
-    length_mm: float = 784.0          # 차량 본체 길이
-    headway_mm: float = 125.0         # 최소 차간 거리
-    max_speed_mm_s: float = 5000.0    # 최고 속도
-    accel_mm_s2: float = 2000.0       # 가속도
-    decel_mm_s2: float = 3500.0       # 감속도
-    line_speed_mm_s: float = 5000.0   # 직선 링크 제한속도
-    curve_speed_mm_s: float = 1000.0  # 곡선 링크 제한속도
+    length_mm: float = 784.0          # vehicle body length
+    headway_mm: float = 125.0         # minimum headway
+    max_speed_mm_s: float = 5000.0    # maximum speed
+    accel_mm_s2: float = 2000.0       # acceleration
+    decel_mm_s2: float = 3500.0       # deceleration
+    line_speed_mm_s: float = 5000.0   # speed limit on straight links
+    curve_speed_mm_s: float = 1000.0  # speed limit on curved links
     source: str = 'built-in'
 
     @property
     def footprint_mm(self) -> float:
-        """섹션 용량 계산용 차량 점유 길이 = 본체 + 최소 차간."""
+        """Vehicle occupancy length for section capacity = body + minimum headway."""
         return self.length_mm + self.headway_mm
 
     def kinematics(self):
@@ -74,7 +75,7 @@ def _read_json(path: str) -> Dict[str, float]:
 
 
 def _read_smat2022_csv(path: str) -> Dict[str, float]:
-    """SMAT2022 VehicleType.csv (탭 구분) 첫 행 → 제원. 링크 제한속도는 없음."""
+    """First row of SMAT2022 VehicleType.csv (tab-separated) → spec. No link speed limits."""
     with open(path, encoding='utf-8-sig') as f:
         row = next(csv.DictReader(f, delimiter='\t'))
     out = {}
@@ -89,7 +90,7 @@ def _read_smat2022_csv(path: str) -> Dict[str, float]:
 
 def load_vehicle_spec(path: Optional[str] = None,
                       overrides: Optional[Dict[str, float]] = None) -> VehicleSpec:
-    """제원 파일을 읽고(없으면 내장 기본값) overrides(mm 단위 필드명)를 덮어쓴다."""
+    """Read the spec file (built-in defaults if absent) and apply overrides (mm-unit field names)."""
     spec = VehicleSpec()
     src = path or (DEFAULT_SPEC_FILE if os.path.exists(DEFAULT_SPEC_FILE) else None)
     if src:
@@ -104,9 +105,9 @@ def load_vehicle_spec(path: Optional[str] = None,
     return spec
 
 
-# ── argparse 연동 ─────────────────────────────────────────────
+# ── argparse integration ─────────────────────────────────────
 def add_vehicle_args(parser) -> None:
-    """두 실행기가 공유하는 차량 제원 옵션. 플래그 > 파일 > 기본 파일."""
+    """Vehicle spec options shared by both runners. Flags > file > default file."""
     g = parser.add_argument_group(
         'vehicle (defaults: dataset/vehicle_spec.json; flags override)')
     g.add_argument('--vehicle-spec', metavar='PATH', default=None,

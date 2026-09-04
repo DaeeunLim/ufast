@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""queue 혼잡 모델의 섹션별 시간평균 점유 heatmap (논문 Figure (a) 의 queue 판).
+"""Per-section time-averaged occupancy heatmap of the queue congestion model
+(queue-model version of paper Figure (a)).
 
-1일 HVLM co-simulation 을 --congestion queue 로 계측 실행해 섹션별
-시간평균 점유 ∫n(s,t)dt / T 를 수집하고, 레일 레이아웃 위에
-Figure (a) 와 동일한 스타일(RdYlGn_r + PowerNorm)로 그린다.
-blocking 으로 정지해 있는 차량도 점유에 포함되므로, delay 모델의
-Figure (a) 와 나란히 두면 두 충실도의 혼잡 표현 차이가 드러난다.
+Runs an instrumented 1-day HVLM co-simulation with --congestion queue,
+collects the time-averaged occupancy ∫n(s,t)dt / T per section, and draws it
+on top of the rail layout in the same style as Figure (a) (RdYlGn_r +
+PowerNorm).  Vehicles stopped by blocking are also counted as occupancy, so
+placing this next to the delay-model Figure (a) reveals how the two fidelity
+levels represent congestion differently.
 
-사용:
+Usage:
   PYTHONPATH=src python scripts/make_queue_occupancy_heatmap.py [out.png]
-  옵션 환경변수: UFAST_HEATMAP_DAYS(기본 1), UFAST_HEATMAP_OHT(기본 100),
-                UFAST_HEATMAP_CONGESTION(기본 queue)
+  Optional environment variables: UFAST_HEATMAP_DAYS (default 1),
+                UFAST_HEATMAP_OHT (default 100), UFAST_HEATMAP_CONGESTION (default queue)
 """
 import os
 import sys
@@ -39,9 +41,9 @@ def main():
     num_oht = int(os.environ.get('UFAST_HEATMAP_OHT', '100'))
     congestion = os.environ.get('UFAST_HEATMAP_CONGESTION', 'queue')
 
-    # ── 계측: _add/_remove_inflight 를 감싸 시간 적분 ∫n dt 수집 ──
+    # ── Instrumentation: wrap _add/_remove_inflight to collect the time integral ∫n dt ──
     occ_integral = defaultdict(float)   # sec -> ∫ n dt
-    occ_last_t = defaultdict(float)     # sec -> 마지막 변경 시각
+    occ_last_t = defaultdict(float)     # sec -> time of last change
     _orig_add = AMHSExecutor._add_inflight
     _orig_remove = AMHSExecutor._remove_inflight
 
@@ -107,7 +109,7 @@ def main():
     fig.tight_layout(pad=0.2)
     fig.savefig(out_path, bbox_inches='tight')
     fig.savefig(out_path.replace('.png', '.pdf'), bbox_inches='tight')
-    print(f"[queue_occ] 저장: {out_path} (+.pdf)")
+    print(f"[queue_occ] Saved: {out_path} (+.pdf)")
 
 
 if __name__ == '__main__':

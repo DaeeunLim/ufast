@@ -1,19 +1,22 @@
 """
-viz/replay_recorder.py — GUI '재생 시뮬레이션' 모드용 기록기.
+viz/replay_recorder.py — recorder for the GUI 'replay simulation' mode.
 
-실시간 모드(기존 Qt 애니메이션)와 달리, 시뮬레이션을 전속력으로 돌리며
-집계 지표를 기록했다가 종료 시 Parquet 저장 + Rerun 뷰어로 재생한다.
+Unlike the real-time mode (the existing Qt animation), this runs the simulation
+at full speed while recording aggregate metrics, then saves them to Parquet at
+the end and replays them in the Rerun viewer.
 
-2계층 기록 설계:
-  - 집계 계층 (전 구간): 섹션별 혼잡도(점유 OHT 수 시간평균), KPI 시계열.
-    규모 = 섹션 수 × 프레임 수. 프레임 수는 frame_budget 으로 상한 고정
-    (기본 10,000) → 실행 기간과 무관하게 용량이 제어된다.
-  - 궤적 계층: OHT 위치·상태를 프레임 스텝으로 다운샘플 기록.
-    빠른 재생에서 개체 추적이 안 되는 한계는 설계상 수용 (개체 검증은
-    실시간 모드 담당).
+Two-layer recording design:
+  - Aggregate layer (whole run): per-section congestion (time-averaged number
+    of occupying OHTs) and KPI time series. Size = sections x frames. The frame
+    count is capped by frame_budget (default 10,000), so storage is bounded
+    regardless of the run length.
+  - Trajectory layer: OHT positions/states down-sampled at the frame step.
+    Not being able to track an individual vehicle during fast replay is an
+    accepted design limitation (per-vehicle verification is the job of the
+    real-time mode).
 
-SimulationThread(백그라운드)에서 on_step() 이 호출되고, 종료 시 같은
-스레드에서 finalize() 가 호출된다. Qt 객체는 일절 사용하지 않는다.
+on_step() is called from the SimulationThread (background), and finalize() is
+called from the same thread at the end. No Qt objects are used at all.
 """
 from __future__ import annotations
 
@@ -22,10 +25,10 @@ from typing import Dict, List, Optional
 
 from ufast.drawing.geometry import CQuadCurve
 
-_OHT_SPEED_MM_S = 1000.0          # viewer.OHTItem 과 동일한 보간 속도
-_CURVE_SAMPLES = 8                # 곡선 폴리라인 근사 분할 수
+_OHT_SPEED_MM_S = 1000.0          # same interpolation speed as viewer.OHTItem
+_CURVE_SAMPLES = 8                # number of segments for the curve polyline approximation
 
-# OHT 상태 색상 (viewer 범례와 동일한 의미 체계)
+# OHT status colours (same semantics as the viewer legend)
 _OHT_COLORS: Dict[str, List[int]] = {
     "IDLE":          [70, 110, 240, 220],
     "REPOSITIONING": [70, 110, 240, 220],
@@ -36,15 +39,15 @@ _OHT_COLOR_MOVING = [255, 165, 0, 255]
 
 _RAIL_COLOR_STATIC = [110, 110, 110, 160]
 
-# 혼잡도 팔레트 — 논문 fig_a(section heatmap)와 동일한 RdYlGn 계열:
-# 0 = 진초록(한산) → 0.5 = 연노랑 → 1 = 빨강(혼잡)
+# Congestion palette — same RdYlGn family as the paper's fig_a (section heatmap):
+# 0 = dark green (quiet) -> 0.5 = pale yellow -> 1 = red (congested)
 _CONG_STOPS = [
     (0.0, (26, 152, 80)),     # green
     (0.5, (255, 255, 191)),   # pale yellow
     (1.0, (215, 48, 39)),     # red
 ]
 
-# EQ 상태 → 코드 → 색 (viewer.update_animation 의 색 체계와 동일)
+# EQ status -> code -> colour (same colour scheme as viewer.update_animation)
 _EQ_STATUS_CODES = {
     "IDLE": 0,
     "WAITING": 1,
@@ -52,16 +55,16 @@ _EQ_STATUS_CODES = {
     "OHT_COMING": 3, "PROCESSING": 3,
 }
 _EQ_CODE_COLORS = {
-    0: [160, 160, 160, 90],     # IDLE 회색
-    1: [255, 165, 0, 220],      # WAITING 주황
-    2: [135, 206, 250, 220],    # 공정 대기 하늘색
-    3: [50, 205, 50, 230],      # OHT 접근/가공 중 녹색
+    0: [160, 160, 160, 90],     # IDLE grey
+    1: [255, 165, 0, 220],      # WAITING orange
+    2: [135, 206, 250, 220],    # waiting for process, sky blue
+    3: [50, 205, 50, 230],      # OHT approaching / processing, green
 }
 _EQ_HALF_SIZE_MM = 400.0
 
 
 def _congestion_color(norm: float) -> List[int]:
-    """0..1 정규화 혼잡도 → RdYlGn(초록→노랑→빨강) 그라디언트."""
+    """Normalised congestion in 0..1 -> RdYlGn (green -> yellow -> red) gradient."""
     norm = max(0.0, min(norm, 1.0))
     for (t0, c0), (t1, c1) in zip(_CONG_STOPS, _CONG_STOPS[1:]):
         if norm <= t1:
@@ -71,7 +74,7 @@ def _congestion_color(norm: float) -> List[int]:
 
 
 def _figure_polyline(fig) -> List[List[float]]:
-    """섹션 figure 하나를 폴리라인 점 목록으로 변환."""
+    """Convert one section figure into a list of polyline points."""
     if isinstance(fig, CQuadCurve):
         pts = []
         for i in range(_CURVE_SAMPLES + 1):
@@ -85,7 +88,7 @@ def _figure_polyline(fig) -> List[List[float]]:
 
 
 def _oht_xy(oht, clock: float, ds) -> Optional[List[float]]:
-    """viewer.OHTItem.update_position 과 동일한 섹션 내 위치 보간."""
+    """Same within-section position interpolation as viewer.OHTItem.update_position."""
     idx = ds.section_id_to_index.get(oht.current_section_id)
     if idx is None:
         return None
@@ -111,7 +114,7 @@ def _oht_xy(oht, clock: float, ds) -> Optional[List[float]]:
 
 
 class ReplayRecorder:
-    """재생 모드 기록기 — 시뮬레이션 스레드에서 on_step/finalize 호출."""
+    """Replay-mode recorder — on_step/finalize are called from the simulation thread."""
 
     def __init__(
         self,
@@ -132,11 +135,11 @@ class ReplayRecorder:
         self.app_id = app_id
         self.out_dir: Optional[str] = None
 
-        # 섹션 목록은 시작 시점에 고정 (id 순서 유지)
+        # The section list is fixed at start time (id order preserved)
         self._section_ids = [s.section_id for s in ds.sections]
         self._sec_index = {sid: i for i, sid in enumerate(self._section_ids)}
 
-        # EQ 목록 고정 (이름 순) — 상태는 프레임별 코드(bytearray)로 압축 저장
+        # EQ list fixed (sorted by name) — status stored compactly as per-frame codes (bytearray)
         self._eq_names = sorted(ds.eq_list.keys())
         self._eq_centers = [
             [ds.eq_list[n].left, ds.eq_list[n].top] for n in self._eq_names
@@ -145,13 +148,13 @@ class ReplayRecorder:
 
         self._next_sample = 0.0
         self._next_frame = 0.0
-        # 버킷 누적: 섹션별 점유 합 / 샘플 수
+        # Bucket accumulators: per-section occupancy sum / sample count
         self._occ_sum = [0.0] * len(self._section_ids)
         self._n_samples = 0
 
-        # 프레임 저장소 (finalize 에서 일괄 저장/로깅)
+        # Frame storage (saved/logged in bulk in finalize)
         self.frame_times: List[float] = []
-        self._congestion_rows: List[List[float]] = []   # frames × sections 평균 점유
+        self._congestion_rows: List[List[float]] = []   # frames x sections mean occupancy
         self._oht_names: List[str] = []
         self._oht_positions: List[List[List[float]]] = []  # frames × ohts × [x,y]
         self._oht_colors: List[List[List[int]]] = []
@@ -161,7 +164,7 @@ class ReplayRecorder:
     def frame_count(self) -> int:
         return len(self.frame_times)
 
-    # ── 시뮬레이션 스레드 훅 ─────────────────────────────────
+    # ── Simulation-thread hooks ──────────────────────────────
     def on_step(self, clock: float):
         if clock >= self._next_sample:
             self._sample_occupancy()
@@ -191,7 +194,7 @@ class ReplayRecorder:
             xy = _oht_xy(oht, clock, self.ds) if oht is not None else None
             if xy is None:
                 xy = [0.0, 0.0]
-                colors.append([0, 0, 0, 0])       # 위치 불명 → 투명
+                colors.append([0, 0, 0, 0])       # unknown position -> transparent
             else:
                 colors.append(_OHT_COLORS.get(oht.status, _OHT_COLOR_MOVING))
             positions.append(xy)
@@ -246,7 +249,7 @@ class ReplayRecorder:
             pass
         return row
 
-    # ── 종료 처리: Parquet 저장 + Rerun 로깅 ──────────────────
+    # ── Finalisation: save Parquet + log to Rerun ─────────────
     def finalize(self) -> Optional[str]:
         if not self.frame_times:
             return None
@@ -259,17 +262,17 @@ class ReplayRecorder:
         try:
             self._save_geometry()
         except Exception as e:  # noqa: BLE001
-            print(f"[replay_recorder] ⚠️ 지오메트리 저장 실패: {e}")
+            print(f"[replay_recorder] ⚠️ Failed to save geometry: {e}")
         try:
             self._log_rerun()
-        except Exception as e:  # noqa: BLE001 — 뷰어 실패가 결과 저장을 막으면 안 됨
-            print(f"[replay_recorder] ⚠️ Rerun 로깅 실패: {e}")
+        except Exception as e:  # noqa: BLE001 — a viewer failure must not block saving results
+            print(f"[replay_recorder] ⚠️ Rerun logging failed: {e}")
         try:
-            # 종료 후 정적 리포트 (KPI 시계열 차트 + 혼잡도 히트맵 + HTML)
+            # Post-run static report (KPI time-series charts + congestion heatmap + HTML)
             from ufast.viz.report import generate_report
             generate_report(self.out_dir)
         except Exception as e:  # noqa: BLE001
-            print(f"[replay_recorder] ⚠️ 리포트 생성 실패: {e}")
+            print(f"[replay_recorder] ⚠️ Report generation failed: {e}")
         return self.out_dir
 
     def _save_parquet(self):
@@ -286,11 +289,11 @@ class ReplayRecorder:
         cong.insert(0, "t", self.frame_times)
         cong_path = os.path.join(self.out_dir, "section_congestion.parquet")
         cong.to_parquet(cong_path, index=False)
-        print(f"[replay_recorder] Parquet 저장: {kpi_path}, {cong_path} "
+        print(f"[replay_recorder] Parquet saved: {kpi_path}, {cong_path} "
               f"({self.frame_count} frames × {len(self._section_ids)} sections)")
 
     def _section_strips(self):
-        """섹션 figure → 폴리라인 목록 + strip 별 소속 섹션 index."""
+        """Section figures -> list of polylines + owning section index per strip."""
         strips: List[List[List[float]]] = []
         strip_section: List[int] = []
         for si, section in enumerate(self.ds.sections):
@@ -300,8 +303,8 @@ class ReplayRecorder:
         return strips, strip_section
 
     def _save_geometry(self):
-        """섹션 지오메트리를 저장 — 리포트(viz.report)가 레일 위에
-        혼잡도를 직접 그릴 때 사용한다."""
+        """Save the section geometry — used by the report (viz.report) to draw
+        congestion directly on the rails."""
         import json
         strips, strip_section = self._section_strips()
         geo: Dict[str, list] = {}
@@ -310,7 +313,7 @@ class ReplayRecorder:
         path = os.path.join(self.out_dir, "section_geometry.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(geo, f)
-        print(f"[replay_recorder] 지오메트리 저장: {path}")
+        print(f"[replay_recorder] Geometry saved: {path}")
 
     def _log_rerun(self):
         import rerun as rr
@@ -321,13 +324,13 @@ class ReplayRecorder:
         except Exception:
             pass
 
-        # ── 정적 레일 ──
+        # ── Static rails ──
         strips, strip_section = self._section_strips()
         rr.log("layout/rails",
                rr.LineStrips2D(strips, colors=_RAIL_COLOR_STATIC, radii=60.0),
                static=True)
 
-        # ── 정적 EQ 마커 (이름 라벨 포함) — 상태색은 프레임별로 갱신 ──
+        # ── Static EQ markers (with name labels) — status colour updated per frame ──
         can_partial_boxes = hasattr(rr.Boxes2D, "from_fields")
         if self._eq_names:
             rr.log("layout/eqs",
@@ -339,7 +342,7 @@ class ReplayRecorder:
                               show_labels=False),
                    static=True)
 
-        # 혼잡도 정규화 기준: 전 프레임 양수 점유의 95 percentile
+        # Congestion normalisation reference: 95th percentile of positive occupancy over all frames
         flat = [v for row in self._congestion_rows for v in row if v > 0]
         if flat:
             flat.sort()
@@ -386,8 +389,8 @@ class ReplayRecorder:
             if "avg_transport_time" in k:
                 rr.log("kpi/avg_transport_time", rr.Scalars(k["avg_transport_time"]))
 
-        # 최초 프레임에 congestion 지오메트리가 없으면 partial update 가 안 보이므로
-        # partial 방식일 때는 지오메트리를 static 으로 한 번 깔아준다.
+        # Partial updates are invisible if the first frame carries no congestion geometry,
+        # so in partial mode lay the geometry down once as a static entity.
         if can_partial:
             rr.set_time("sim_time", duration=self.frame_times[0])
             rr.log("layout/congestion",
@@ -399,7 +402,7 @@ class ReplayRecorder:
         rrd_path = os.path.join(self.out_dir, "replay.rrd")
         try:
             rr.save(rrd_path)
-            print(f"[replay_recorder] .rrd 저장: {rrd_path}")
+            print(f"[replay_recorder] .rrd saved: {rrd_path}")
         except Exception as e:  # noqa: BLE001
-            print(f"[replay_recorder] ⚠️ .rrd 저장 실패(뷰어는 정상): {e}")
-        print(f"[replay_recorder] Rerun 로깅 완료 — {self.frame_count} frames")
+            print(f"[replay_recorder] ⚠️ Failed to save .rrd (viewer is unaffected): {e}")
+        print(f"[replay_recorder] Rerun logging complete — {self.frame_count} frames")

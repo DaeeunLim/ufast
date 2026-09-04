@@ -339,7 +339,7 @@ def _fills_result_path(dataset: str, days: int, oht: int, seed: int,
                        amhs_settling_days: float = 0.0,
                        congestion: str = "queue") -> Path:
     # Mirrors src/ufast/results.auto_result_path for fifo/fifo/{congestion}.
-    # non-default machine_selection 은 '_ms{sel}' suffix 로 exact 결과와 분리.
+    # A non-default machine_selection is separated from exact results by the '_ms{sel}' suffix.
     ms = "" if machine_selection == "exact" else f"_ms{machine_selection}"
     warmup = _warmup_suffix(static_warmup_days, amhs_settling_days)
     cg = {"section_local": "sl", "global_tip": "gt", "off": "no"}.get(
@@ -389,7 +389,7 @@ def load_fills(dataset: str, days: int, oht: int, seed: int,
         else:
             raise FileNotFoundError(
                 f"U-FAST result not found: {path}\n"
-                f"  → 먼저 라이브 실행하려면 --fills-source run 사용"
+                f"  → use --fills-source run to run it live first"
             )
     with open(path, encoding="utf-8") as f:
         result = json.load(f)
@@ -420,8 +420,8 @@ def run_fills(dataset: str, days: int, oht: int, dispatcher: str, seed: int,
     Regenerating per seed means changing --seed just works without a manual
     pre-run.  Uses fifo dispatcher / fifo AMHS strategy; the congestion
     variant is pinned explicitly so the filename matches load_fills
-    (기본 queue = 대표 blocking 모델. 2026-08 이전의 E1 delay 결과를 재현하려면
-    --ufast-congestion section_local).
+    (default queue = the representative blocking model; to reproduce the pre-2026-08
+    E1 delay results use --ufast-congestion section_local).
     """
     dataset_dir = f"dataset/{dataset}"
     rail_file = "dataset/SMAT2022.rail"
@@ -913,22 +913,23 @@ def main() -> int:
     parser.add_argument("--summarize-only", action="store_true")
     parser.add_argument(
         "--baseline-python", default=None,
-        help="PySCFabSim/LogiFabSim 실행 인터프리터 (예: pypy3 경로). "
-             "기본=현재 python(=U-FAST와 동일). 런타임 공정 비교 시 명시 권장.",
+        help="Interpreter for running PySCFabSim/LogiFabSim (e.g. path to pypy3). "
+             "Default = current python (same as U-FAST). Recommended to set explicitly "
+             "for a fair runtime comparison.",
     )
     parser.add_argument(
         "--ufast-congestion", default="queue",
         choices=["queue", "section_local", "global_tip", "off"],
-        help="U-FAST 혼잡 모델 (기본 queue=대표 blocking. "
-             "2026-08 이전 E1 delay 결과 재현은 section_local).",
+        help="U-FAST congestion model (default queue = representative blocking model; "
+             "use section_local to reproduce the pre-2026-08 E1 delay results).",
     )
     parser.add_argument(
         "--fills-source", default="run", choices=["run", "load"],
-        help="run=-m ufast.cosim.run 라이브 실행(seed별 재생성), load=기존 결과 JSON 로드.",
+        help="run = live run via -m ufast.cosim.run (regenerated per seed), load = load an existing result JSON.",
     )
     parser.add_argument(
         "--warmup-days", type=float, default=0.0,
-        help="정상상태 도달 전 warm-up 구간(일). done_at이 이 시각 이후인 lot만 집계.",
+        help="Warm-up period before steady state (days). Only lots whose done_at is after this time are aggregated.",
     )
     parser.add_argument(
         "--static-warmup-days", type=float, default=0.0,
@@ -940,15 +941,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--machine-selection", default="exact", choices=["exact", "nearest"],
-        help="U-FAST 머신선택: exact(정확 route, 기본) / nearest(rough, 빠름·이송 근사).",
+        help="U-FAST machine selection: exact (exact route, default) / nearest (rough, fast, approximate transport).",
     )
     parser.add_argument(
         "--mode", default="compare", choices=["compare", "sweep"],
-        help="compare=3-way KPI 비교(E1), sweep=OHT sweep + CF 오버레이(E2).",
+        help="compare = 3-way KPI comparison (E1), sweep = OHT sweep + CF overlay (E2).",
     )
     parser.add_argument(
         "--oht-list", nargs="+", type=int, default=[20, 30, 50, 100, 200],
-        help="sweep 모드에서 U-FAST OHT 대수 목록 (E2).",
+        help="List of U-FAST OHT fleet sizes in sweep mode (E2).",
     )
     args = parser.parse_args()
     effective_warmup_days = max(
@@ -961,8 +962,8 @@ def main() -> int:
     if baseline_py and os.path.basename(baseline_py) != os.path.basename(fills_py):
         print(
             f"[fairness] baseline={_interpreter_label(baseline_py)} vs "
-            f"U-FAST={_interpreter_label(fills_py)} — 인터프리터가 다릅니다. "
-            f"런타임 비교 시 이 차이를 논문에 명시하세요."
+            f"U-FAST={_interpreter_label(fills_py)} — interpreters differ. "
+            f"State this difference in the paper when comparing runtimes."
         )
 
     if args.mode == "sweep":

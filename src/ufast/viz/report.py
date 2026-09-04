@@ -1,20 +1,21 @@
 """
-viz/report.py — 재생(Replay) 실행 결과의 종료 후 리포트 생성.
+viz/report.py — post-run report generation for replay runs.
 
-logs/replay/<timestamp>/ 의 Parquet(KPI 시계열 + 섹션 혼잡도)을 읽어
-정적 차트(PNG)와 하나의 report.html 로 묶는다. 실시간 뷰(Rerun)와 달리
-논문 그림/공유용 정적 산출물이 목적이다.
+Reads the Parquet files (KPI time series + section congestion) in
+logs/replay/<timestamp>/ and bundles static charts (PNG) into a single
+report.html. Unlike the live view (Rerun), the goal is static output for
+paper figures and sharing.
 
-생성 파일 (replay 폴더 안):
-  - kpi_timeseries.png          KPI 4패널 시계열
-  - congestion_heatmap.png      섹션 × 시간 혼잡도 히트맵 (시계열 heatmap)
-  - congestion_total.png        전체 혼잡(점유 합) 추이
-  - report.html                 위 차트 + 요약 표를 묶은 단일 리포트
+Generated files (inside the replay folder):
+  - kpi_timeseries.png          4-panel KPI time series
+  - congestion_heatmap.png      section x time congestion heatmap (time-series heatmap)
+  - congestion_total.png        fab-wide congestion (occupancy sum) over time
+  - report.html                 single report combining the charts above + summary table
 
-사용:
-  python3 viz/report.py                     # logs/replay 최신 폴더 자동
-  python3 viz/report.py logs/replay/<ts>    # 폴더 지정
-(ReplayRecorder.finalize() 가 재생 종료 시 자동 호출한다)
+Usage:
+  python3 viz/report.py                     # latest folder under logs/replay, automatically
+  python3 viz/report.py logs/replay/<ts>    # explicit folder
+(ReplayRecorder.finalize() calls this automatically when a replay ends)
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ if _BASE not in sys.path:
 
 
 def _time_axis(t_seconds):
-    """지속시간에 맞는 (환산값 배열, 축 라벨) 선택."""
+    """Pick (converted value array, axis label) appropriate for the duration."""
     span = float(t_seconds.iloc[-1]) if len(t_seconds) else 0.0
     if span >= 2 * 86400:
         return t_seconds / 86400.0, "Time (days)"
@@ -86,7 +87,7 @@ def fig_kpi_timeseries(kpi, out_png: str):
         ax.grid(True, alpha=0.3)
         ax.set_title("WIP (undelivered transport jobs)")
 
-    # 데이터가 있는 패널만 그린다 (컬럼이 없으면 빈 축을 남기지 않음)
+    # Draw only panels that have data (no empty axes when a column is missing)
     panels = [draw_throughput, draw_fleet]
     if any(c in kpi.columns for c in
            ("avg_transport_time", "avg_delivery_time", "avg_call_wait")):
@@ -108,10 +109,10 @@ def fig_kpi_timeseries(kpi, out_png: str):
 
 
 def fig_congestion_map(cong, geometry: dict, out_png: str):
-    """레일 레이아웃 위에 시간평균 혼잡도를 직접 그린다 (논문 fig_a 스타일).
+    """Draw time-averaged congestion directly on the rail layout (paper fig_a style).
 
     geometry: {section_id(str): [strip, ...]}, strip = [[x, y], ...]
-    색: RdYlGn_r (초록=한산 → 빨강=혼잡), p95 정규화.
+    Colour: RdYlGn_r (green = quiet -> red = congested), p95-normalised.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -149,7 +150,7 @@ def fig_congestion_map(cong, geometry: dict, out_png: str):
 
 
 def fig_congestion_heatmap(cong, out_png: str, top_n: int = 60):
-    """섹션 × 시간 혼잡도(평균 점유) 히트맵 — 평균 점유 상위 top_n 섹션."""
+    """Section x time congestion (mean occupancy) heatmap — the top_n sections by mean occupancy."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -161,8 +162,8 @@ def fig_congestion_heatmap(cong, out_png: str, top_n: int = 60):
     means = data.mean(axis=0)
     top = means.sort_values(ascending=False).head(top_n)
     sel = data[top.index]                       # frames × top_n
-    # 프레임 단위 점유(0/1 점멸)는 점묘처럼 보이므로 시간축 롤링 평균으로
-    # 부드럽게 — 창 크기는 전체의 ~0.5% (최소 1)
+    # Per-frame occupancy (0/1 flicker) looks like stippling, so smooth it with a
+    # rolling mean along the time axis — window ~0.5% of the total (minimum 1)
     win = max(1, len(sel) // 200)
     if win > 1:
         sel = sel.rolling(window=win, min_periods=1).mean()
@@ -269,7 +270,7 @@ section_congestion.parquet</p>
 
 
 def generate_report(replay_dir: str) -> str:
-    """replay 폴더의 Parquet 을 읽어 PNG 차트 + report.html 생성."""
+    """Read the Parquet files in a replay folder and generate PNG charts + report.html."""
     import pandas as pd
 
     kpi = pd.read_parquet(os.path.join(replay_dir, "kpi_timeseries.parquet"))
@@ -280,7 +281,7 @@ def generate_report(replay_dir: str) -> str:
     fig_kpi_timeseries(kpi, p)
     images.append(("KPI time series", p))
 
-    # 레일 위 공간 히트맵 (지오메트리가 있을 때) — 없으면 섹션×시간 매트릭스
+    # Spatial heatmap on the rails (when geometry is available) — otherwise a section x time matrix
     geo_path = os.path.join(replay_dir, "section_geometry.json")
     if os.path.isfile(geo_path):
         import json
@@ -299,7 +300,7 @@ def generate_report(replay_dir: str) -> str:
     images.append(("Fab-wide congestion", p))
 
     html = build_html(replay_dir, _summary_rows(kpi, cong), images)
-    print(f"[viz.report] 리포트 생성: {html}")
+    print(f"[viz.report] Report generated: {html}")
     return html
 
 
@@ -310,10 +311,10 @@ def main():
         dirs = sorted(glob.glob(os.path.join("logs", "replay", "*")))
         dirs = [d for d in dirs if os.path.isdir(d)]
         if not dirs:
-            print("logs/replay/ 에 결과가 없습니다. Replay 모드로 먼저 실행하세요.")
+            print("No results found in logs/replay/. Run in Replay mode first.")
             sys.exit(1)
         replay_dir = dirs[-1]
-        print(f"(최신 replay 자동: {replay_dir})")
+        print(f"(auto-selected latest replay: {replay_dir})")
     generate_report(replay_dir)
 
 

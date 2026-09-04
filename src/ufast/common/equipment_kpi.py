@@ -27,10 +27,11 @@ def open_starvation(machine, process_end_s: float) -> None:
 def close_starvation(machine, next_lot_time_s: float, lots=None) -> None:
     """Close starvation when the next lot becomes available for dispatch.
 
-    Interval tuple: (start_s, end_s, transport_s).  transport_s 는 이 구간을
-    닫아준 lot 의 이송 창(last_transit_start~end)과 starvation 구간의 겹침 —
-    "이송이 순간이동이었다면 없었을 굶주림"(transport-blocked).  나머지는
-    upstream(재료가 이송 중조차 아니었던 시간).  lots 미전달 시 0.
+    Interval tuple: (start_s, end_s, transport_s).  transport_s is the overlap
+    between the starvation interval and the transport window
+    (last_transit_start~end) of the lot that closed it — "starvation that would
+    not exist if transport were instantaneous" (transport-blocked).  The rest is
+    upstream (time when material was not even in transit).  0 if lots is not given.
     """
     start_s = getattr(machine, "starvation_open_since", None)
     if start_s is None:
@@ -39,7 +40,7 @@ def close_starvation(machine, next_lot_time_s: float, lots=None) -> None:
     end_s = max(start_s, float(next_lot_time_s))
     transport_s = 0.0
     if lots and end_s > start_s:
-        # 배치 dispatch 는 가장 늦게 준비된 lot 이 시점을 결정한다 — 그 lot 기준.
+        # For a batch dispatch the latest-ready lot determines the time — use that lot.
         binding = max(lots, key=lambda l: l.free_since if l.free_since is not None else start_s)
         ts = getattr(binding, "last_transit_start", None)
         te = getattr(binding, "last_transit_end", None)
@@ -108,8 +109,9 @@ def collect_equipment_kpis(instance) -> dict[str, Any]:
                 if measurement_start_s <= interval[1] <= measurement_end_s:
                     clipped = _overlap(interval, measurement_start_s, measurement_end_s)
                     starvation.append(clipped)
-                    # transport 귀속분은 구간 꼬리(배달 시점=close)에 붙으므로
-                    # 시작이 잘려도 min() 으로 정확히 보존된다.
+                    # The transport-attributed part sits at the tail of the interval
+                    # (delivery time = close), so min() preserves it exactly even if the
+                    # start is clipped.
                     raw_transport = interval[2] if len(interval) > 2 else 0.0
                     transport_blocked.append(min(raw_transport, clipped))
             open_since = getattr(machine, "starvation_open_since", None)
@@ -141,10 +143,11 @@ def collect_equipment_kpis(instance) -> dict[str, Any]:
         breakdown_s = sum(end - start for start, end in breakdown_intervals)
         pm_s = sum(end - start for start, end in pm_intervals)
 
-        # ── 가동률 시간예산 분해 ──
-        # busy/setup 구간(dispatch 시 기록)이 있으면 측정창 clipping 으로 임의
-        # 창(warm-up 포함)에서 계산. 구간이 없는 레거시 실행은 whole-run 스칼라
-        # (utilized_time/setuped_time) fallback — measurement_start_s == 0 일 때만.
+        # ── Utilization time-budget decomposition ──
+        # If busy/setup intervals (recorded at dispatch) exist, compute over an arbitrary
+        # window (including warm-up) by clipping to the measurement window. Legacy runs
+        # without intervals fall back to whole-run scalars (utilized_time/setuped_time)
+        # — only when measurement_start_s == 0.
         has_intervals = any(getattr(m, "busy_intervals", None) for m in machines)
         window_total_s = (measurement_end_s - measurement_start_s) * len(machines)
         starvation_total_s = sum(starvation)
@@ -161,7 +164,8 @@ def collect_equipment_kpis(instance) -> dict[str, Any]:
             setup_s = sum(float(getattr(m, "setuped_time", 0.0)) for m in machines)
             budget_ok = measurement_start_s == 0 and window_total_s > 0
         if budget_ok:
-            # starvation 과 downtime 구간이 겹치면 미세 음수 가능 — 경계 오차로 허용.
+            # May go slightly negative when starvation and downtime intervals overlap —
+            # tolerated as a boundary error.
             idle_other_s = (window_total_s - busy_s - setup_s - downtime_s
                             - starvation_total_s - sum(censored))
             utilization_pct = round(100.0 * busy_s / window_total_s, 2)

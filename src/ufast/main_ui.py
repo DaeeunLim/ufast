@@ -1,7 +1,7 @@
 import os
 import sys
 
-# 파일 직접 실행(python src/ufast/main_ui.py) 지원용 — src 를 sys.path 에 추가
+# Support running the file directly (python src/ufast/main_ui.py) — add src to sys.path
 _SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
@@ -33,14 +33,14 @@ from ufast.common.fromto_parser import load_fromto
 from ufast.common.logger import get_logger
 from ufast.common.strategy_loader import StrategyLoadError, describe_strategy, load_strategy
 
-# 통합: 타임라인 + 생산 러너
+# Integrated: timeline + production runner
 from ufast.integration.timeline import TimelineRecorder, Snapshot
 try:
     from ufast.integration.production_runner import ProductionRunner, ProductionParams
     _PROD_RUNNER_AVAILABLE = True
 except Exception as _pe:  # noqa: BLE001
     _PROD_RUNNER_AVAILABLE = False
-    print(f"[main_ui] ⚠️ ProductionRunner import 실패: {_pe}")
+    print(f"[main_ui] ⚠️ ProductionRunner import failed: {_pe}")
 
 try:
     from ufast.route import RouteManager, SectionNodeBridge, Dispatcher, NearestIdleStrategy
@@ -49,52 +49,52 @@ try:
 except ImportError:
     _ROUTE_PKG_AVAILABLE = False
     get_logistics_logger = None
-    print("[main_ui] ⚠️  route 패키지 import 실패 → 기존 Dijkstra만 사용")
+    print("[main_ui] ⚠️  route package import failed → falling back to legacy Dijkstra only")
 
 
 # ──────────────────────────────────────────────────────────────
-#  시뮬레이션 워커 스레드
-#  메인 스레드(GUI)와 분리하여 Dijkstra 등 무거운 연산이
-#  화면 렌더링을 블로킹하지 않도록 한다.
+#  Simulation worker thread
+#  Runs separately from the main (GUI) thread so that heavy computations such as
+#  Dijkstra do not block screen rendering.
 # ──────────────────────────────────────────────────────────────
 class SimulationThread(QThread):
     """
-    시뮬레이션 루프 전용 스레드.
+    Dedicated thread for the simulation loop.
 
-    - Qt GUI 객체는 절대 직접 호출하지 않는다.
-    - GUI 업데이트가 필요한 경우 signal을 emit하여 메인 스레드에 위임한다.
+    - Never calls Qt GUI objects directly.
+    - When a GUI update is needed, emits a signal and delegates to the main thread.
 
-    ── 속도 제어 (수정됨) ──────────────────────────────────────
-    기존 버그: 매 스텝마다 고정된 time_step(0.05s)을 더하고 8ms 간격으로
-    돌렸기 때문에 1x 에서도 sim-time 이 실제시간의 약 6.25배로 흘렀다.
+    ── Speed control (fixed) ──────────────────────────────────
+    Previous bug: a fixed time_step (0.05s) was added every step at an 8ms interval,
+    so even at 1x the sim-time advanced about 6.25 times faster than real time.
 
-    수정: sim-clock 을 "직전 스텝으로부터 실제 경과시간 × sim_speed" 만큼
-    증가시킨다.
+    Fix: advance the sim-clock by "real elapsed time since the previous step ×
+    sim_speed".
         Δsim = (now - prev_real) × sim_speed
-    따라서
-        sim_speed = 1.0  →  sim-time 이 실제시간과 1:1 (실시간)
-        sim_speed = 20.0 →  실제 1초당 sim-time 20초 (정확히 20배속)
-    프레임이 길어져도(연산 지연) 그만큼 Δreal 이 커져 비율이 유지된다.
+    Therefore
+        sim_speed = 1.0  →  sim-time runs 1:1 with real time (real-time)
+        sim_speed = 20.0 →  20 s of sim-time per real second (exactly 20x)
+    Even if a frame takes longer (compute delay), Δreal grows accordingly and the ratio holds.
     """
 
-    # 메인 스레드에서 처리할 이벤트용 시그널
-    status_message = pyqtSignal(str)   # 상태바 문자열
-    sim_finished   = pyqtSignal()      # 시뮬레이션 완료 (로그 저장 트리거)
+    # Signals for events to be handled on the main thread
+    status_message = pyqtSignal(str)   # status-bar text
+    sim_finished   = pyqtSignal()      # simulation complete (triggers log saving)
 
-    STEP_INTERVAL = 0.008   # 목표 렌더 스텝 간격(초). 부드러움 ↔ CPU 사용량 균형
+    STEP_INTERVAL = 0.008   # target render step interval (s). Balances smoothness vs. CPU usage
 
     def __init__(self, app: "SimulationApp"):
         super().__init__()
         self._app = app
         self._active = False
-        self._prev_real = None     # 직전 스텝의 wall-clock 시각
+        self._prev_real = None     # wall-clock time of the previous step
 
-    # ── 외부 제어 ─────────────────────────────────────────────
+    # ── External control ──────────────────────────────────────
     def request_stop(self):
-        """메인 스레드에서 안전하게 루프를 중단한다."""
+        """Safely stop the loop from the main thread."""
         self._active = False
 
-    # ── 스레드 진입점 ──────────────────────────────────────────
+    # ── Thread entry point ────────────────────────────────────
     def run(self):
         import time
         self._active = True
@@ -116,16 +116,16 @@ class SimulationThread(QThread):
                 self._active = False
                 break
 
-            # 목표 스텝 간격까지 sleep → CPU 과점유 방지.
-            # 재생(replay) 모드에서는 sleep 없이 전속력으로 돈다.
+            # Sleep until the target step interval → avoids hogging the CPU.
+            # In replay mode, run at full speed without sleeping.
             if self._app.replay_recorder is None:
                 elapsed = time.perf_counter() - t0
                 rest = self.STEP_INTERVAL - elapsed
                 if rest > 0.0001:
                     time.sleep(rest)
 
-        # 재생 모드: 종료/중단 시점에 기록을 마감 (Parquet + Rerun 뷰어).
-        # GUI 객체는 건드리지 않으므로 워커 스레드에서 실행해도 안전하다.
+        # Replay mode: finalize the recording at completion/stop (Parquet + Rerun viewer).
+        # It does not touch GUI objects, so it is safe to run on the worker thread.
         rec = self._app.replay_recorder
         if rec is not None and rec.frame_count > 0:
             self.status_message.emit("Writing replay outputs (Parquet + Rerun viewer)...")
@@ -138,29 +138,29 @@ class SimulationThread(QThread):
         if finished:
             self.sim_finished.emit()
 
-    # ── 단일 시뮬레이션 스텝 (GUI 객체 접근 금지) ─────────────
+    # ── Single simulation step (no GUI object access) ─────────
     def _step(self, now: float) -> bool:
         """
-        시뮬레이션 한 스텝을 진행한다.
-        now: 이번 스텝의 wall-clock 시각(perf_counter).
-        True 반환 → 시뮬레이션 종료 조건 충족.
+        Advance the simulation by one step.
+        now: wall-clock time of this step (perf_counter).
+        Returns True → simulation termination condition met.
         """
         app = self._app
         ds  = app.ds
 
         replay = app.replay_recorder is not None
 
-        # 실제 경과시간 × 배속 만큼 sim-clock 증가 (실시간 기준).
+        # Advance the sim-clock by real elapsed time × speed factor (real-time basis).
         real_dt = now - self._prev_real
         self._prev_real = now
-        # 비정상적으로 큰 점프(디버거 중단 등) 방지: 0.25s 로 클램프
+        # Guard against abnormally large jumps (e.g. debugger pauses): clamp to 0.25s
         if real_dt > 0.25:
             real_dt = 0.25
         prev_clock = ds.main_clock
         if replay:
-            # 재생 모드: wall-clock 과 무관하게 고정 스텝 전속력 진행.
-            # (배속 기반 큰 점프는 idle 재배치 등 주기 로직의 빈도를 바꿔
-            #  결과가 달라지므로, 스텝 폭을 고정해 결정성을 유지한다.)
+            # Replay mode: fixed-step full-speed progression, independent of the wall-clock.
+            # (Large speed-based jumps change how often periodic logic such as idle
+            #  repositioning runs and thus alter results, so the step size is fixed for determinism.)
             ds.main_clock += 0.1
         else:
             ds.main_clock += real_dt * app.sim_speed
@@ -168,7 +168,7 @@ class SimulationThread(QThread):
         if app.route_manager:
             app.route_manager.sim_time = ds.main_clock
 
-        # ── 종료 체크 ──────────────────────────────────────────
+        # ── Termination check ─────────────────────────────────
         if ds.main_clock >= app.sim_duration:
             ds.main_clock = app.sim_duration
             processed = ds.num_of_processed_lot
@@ -179,7 +179,7 @@ class SimulationThread(QThread):
             )
             return True
 
-        # ── 이벤트 처리 ────────────────────────────────────────
+        # ── Event processing ──────────────────────────────────
         while ds.event_queue:
             evt = ds.event_queue[0]
             if evt.time_scheduled <= ds.main_clock:
@@ -189,7 +189,7 @@ class SimulationThread(QThread):
             else:
                 break
 
-        # ── IDLE OHT 재배치 ────────────────────────────────────
+        # ── IDLE OHT repositioning ────────────────────────────
         if (
             app.event_handler is not None
             and app.route_manager is not None
@@ -199,20 +199,20 @@ class SimulationThread(QThread):
             app.event_handler.reposition_idle_ohts(ds.main_clock)
             app._last_idle_repo_scan = ds.main_clock
 
-        # ── 데드락 검사 (30s 주기) ──────────────────────────────
+        # ── Deadlock check (every 30s) ────────────────────────
         if app.route_manager and ds.main_clock - app._last_deadlock_check >= 30.0:
             app._last_deadlock_check = ds.main_clock
             deadlocks = app.route_manager.detect_deadlock()
             if deadlocks:
-                print(f"[DEADLOCK] ⚠️  t={ds.main_clock:.1f}s 데드락 감지: {deadlocks}")
+                print(f"[DEADLOCK] ⚠️  t={ds.main_clock:.1f}s deadlock detected: {deadlocks}")
 
-        # ── 상태 메시지 / 콘솔 로그 ────────────────────────────
+        # ── Status message / console log ──────────────────────
         processed  = ds.num_of_processed_lot
         total      = ds.lot_count
         oht_count  = len(ds.oht_list)
 
         if replay:
-            # 재생 모드는 sim-time 이 매우 빠르게 흐르므로 wall-clock 기준으로 제한
+            # In replay mode sim-time advances very quickly, so throttle by wall-clock
             need_status = (now - self._last_status_wall) >= 0.2
             log_bucket  = 3600
         else:
@@ -223,7 +223,7 @@ class SimulationThread(QThread):
         need_log    = (curr_10 != prev_10) and (oht_count > 0)
 
         if need_status or need_log:
-            # GIL 덕분에 dict iteration은 안전 (시뮬레이션 중 oht_list 변경 없음)
+            # dict iteration is safe thanks to the GIL (oht_list does not change during the simulation)
             idle_cnt     = sum(1 for o in ds.oht_list.values() if o.status == "IDLE")
             assigned_cnt = sum(1 for o in ds.oht_list.values() if o.status == "ASSIGNED")
             loaded_cnt   = sum(1 for o in ds.oht_list.values() if o.status == "LOADED")
@@ -247,7 +247,7 @@ class SimulationThread(QThread):
                     f"/ total={oht_count} | Lots {processed}/{total}"
                 )
 
-        # ── 기록: 재생 모드는 ReplayRecorder, 실시간 모드는 타임라인 스냅샷 ──
+        # ── Recording: ReplayRecorder in replay mode, timeline snapshots in real-time mode ──
         if replay:
             app.replay_recorder.on_step(ds.main_clock)
         elif app.timeline_recorder is not None:
@@ -261,7 +261,7 @@ class SimulationThread(QThread):
 
 # ──────────────────────────────────────────────────────────────
 class StrategyConfigDialog(QWidget):
-    """시뮬레이션 시작 전 외부 전략 파일 사용 여부와 경로를 선택하는 다이얼로그."""
+    """Dialog for choosing external strategy files (enable + path) before the simulation starts."""
 
     _LABELS = {
         "routing":          "Routing strategy",
@@ -338,14 +338,14 @@ class SimulationApp:
     def __init__(self):
         self.app = QApplication(sys.argv)
 
-        # 1. 데이터셋 및 매니저 초기화
+        # 1. Initialize the dataset and managers
         self.ds           = SimulatorDataSet.get_instance()
         self.rail_manager = RailManager()
 
         self.vehicle_controller: VehicleController | None = None
         self.event_handler:      EventHandler      | None = None
         self.fromto_data = []
-        self.fromto_filename = None      # 통합: 현재 로딩된 From-To 차트 파일명
+        self.fromto_filename = None      # Integrated: file name of the currently loaded From-To chart
         self.route_manager: RouteManager      | None = None
         self.bridge:        SectionNodeBridge | None = None
         self.custom_strategy_paths = {
@@ -356,7 +356,7 @@ class SimulationApp:
         self.simulator_mode         = "production_logistics"
         self.default_processing_time = 60.0
 
-        # 2. 뷰어 초기화
+        # 2. Initialize the viewer
         self.viewer = SimulationViewer()
         self.viewer.simulation_start_signal.connect(self.start_simulation)
         self.viewer.simulation_stop_signal.connect(self.stop_simulation)
@@ -369,61 +369,61 @@ class SimulationApp:
         self.viewer.save_log_signal.connect(lambda: self._save_logs())
         self.viewer.layer_panel.layer_changed.connect(self.on_layer_changed)
         self.viewer.layer_panel.convert_to_rail.connect(self.on_convert_to_rail)
-        # 통합: 모드 전환 / 타임라인 재생 시그널
+        # Integrated: mode switching / timeline playback signals
         self.viewer.mode_changed_signal.connect(self.on_mode_changed)
         self.viewer.timeline_scrubbed_signal.connect(self.on_timeline_scrubbed)
         self.viewer.playback_toggled_signal.connect(self.on_playback_toggled)
         self.viewer.go_live_signal.connect(self.on_go_live)
-        # 패널 상주 Run Options 관련
+        # Panel-resident Run Options
         self.viewer.configure_strategies_signal.connect(self.open_strategy_dialog)
         self.viewer.production_add_dataset_signal.connect(self.on_production_add_dataset)
         self.viewer.draw_layout()
         self.viewer.show()
 
-        # 3. 시뮬레이션 설정
+        # 3. Simulation settings
         self.sim_speed    = 1.0
         self.sim_duration = 3600.0
         self.max_sim_duration = 31_536_000.0
 
-        # 시뮬레이션 스레드 (None = 정지 상태)
+        # Simulation thread (None = stopped)
         self.sim_thread: SimulationThread | None = None
 
-        # 주기적 작업 추적 타임스탬프
+        # Timestamps for tracking periodic tasks
         self._last_idle_repo_scan  = -9999.0
         self._last_deadlock_check  = -9999.0
         self._last_status_update   = -9999.0
 
-        # ── 통합: 모드 / 타임라인 / 생산 러너 ──────────────────
+        # ── Integrated: mode / timeline / production runner ──────
         self.app_mode = "logistics"             # "logistics" | "production"
-        # 재생(replay) 모드 기록기 — None 이면 실시간(live) 모드
+        # Replay-mode recorder — None means real-time (live) mode
         self.replay_recorder = None
-        # 물류: sim-time 1초 간격 스냅샷 / 생산: 러너가 자체 간격 설정
+        # Logistics: snapshots every 1 s of sim-time / production: the runner sets its own interval
         self.timeline_recorder = TimelineRecorder(snapshot_interval=1.0)
         self.production_runner: "ProductionRunner | None" = None
         self.production_params = ProductionParams() if _PROD_RUNNER_AVAILABLE else None
 
-        # 재생(playback) 상태
+        # Playback state
         self._playback_active = False
-        self._playback_clock = 0.0              # 재생 중인 가상 sim-time
-        self._reviewing = False                 # 과거 탐색(리뷰) 중 여부
+        self._playback_clock = 0.0              # virtual sim-time being played back
+        self._reviewing = False                 # whether the user is browsing the past (review)
         self._playback_timer = QTimer()
         self._playback_timer.timeout.connect(self._on_playback_tick)
         self._playback_timer.setInterval(33)    # ~30fps
         self._playback_last_real = None
 
-        # 실시간(LIVE) 진행 중 타임라인 진행바 자동 추종 타이머
+        # Timer that keeps the timeline progress bar following the LIVE simulation
         self._live_follow_timer = QTimer()
         self._live_follow_timer.timeout.connect(self._on_live_follow_tick)
-        self._live_follow_timer.setInterval(100)  # 0.1s 마다 진행바 갱신
+        self._live_follow_timer.setInterval(100)  # refresh the progress bar every 0.1s
 
-        # 통합: 시작 시 상태바 우측 실행 정보 초기화 (기본 물류 모드)
+        # Integrated: initialize the run-info text at the right of the status bar (default logistics mode)
         self.viewer.set_run_info("From-To: (not loaded)")
 
-    # ── 시뮬레이션 루프 (스레드에서 호출) ─────────────────────
+    # ── Simulation loop (called from the thread) ──────────────
     def _is_sim_running(self) -> bool:
         return self.sim_thread is not None and self.sim_thread.isRunning()
 
-    # ── 통합: 물류 스냅샷 빌더 (SimulationThread에서 호출) ─────
+    # ── Integrated: logistics snapshot builder (called from SimulationThread) ─
     def _build_logistics_snapshot(self) -> "Snapshot":
         ds = self.ds
         ohts = {}
@@ -457,9 +457,9 @@ class SimulationApp:
             },
         )
 
-    # ── 통합: 모드 전환 ───────────────────────────────────────
+    # ── Integrated: mode switching ────────────────────────────
     def on_mode_changed(self, mode: str):
-        # 진행 중이면 멈춘다
+        # Stop if running
         self.stop_simulation()
         self._stop_playback()
         self.app_mode = mode
@@ -468,13 +468,13 @@ class SimulationApp:
             self.viewer.statusBar().showMessage(
                 "Production mode: Run ▶ to compute with a PySCFabSim dataset."
             )
-            # 상태바 우측: 마지막 선택 데이터셋(있으면) 표시
+            # Status-bar right side: show the last selected dataset (if any)
             self._update_production_run_info()
         else:
             self.viewer.statusBar().showMessage(
                 "Logistics mode: load DXF/Rail + FromTo, then run."
             )
-            # 상태바 우측: 현재 로딩된 From-To 차트 표시
+            # Status-bar right side: show the currently loaded From-To chart
             if self.fromto_filename:
                 self.viewer.set_run_info(
                     f"From-To: {self.fromto_filename} ({len(self.fromto_data)} records)"
@@ -483,7 +483,7 @@ class SimulationApp:
                 self.viewer.set_run_info("From-To: (not loaded)")
 
     def _update_production_run_info(self):
-        """상태바 우측 + 대시보드에 현재 생산 데이터셋 정보를 표시."""
+        """Show the current production dataset info on the status bar (right) and dashboard."""
         import os
         if self.production_params and getattr(self.production_params, "dataset", None):
             ds = self.production_params.dataset
@@ -505,13 +505,13 @@ class SimulationApp:
             if self.viewer.production_dashboard:
                 self.viewer.production_dashboard.set_dataset_info("Dataset: (not selected)")
 
-    # ── 통합: 재생(playback) / 과거 탐색(review) 제어 ─────────
+    # ── Integrated: playback / past-browsing (review) control ──
     #
-    # 두 상황을 구분한다.
-    #  (1) 시뮬레이션 실시간 진행 중(LIVE): 시뮬레이션 스레드는 계속 돈다.
-    #      진행바를 잡으면 '과거 보기(review)'로 들어가 그 시점 스냅샷만 화면에
-    #      표시하되, 시뮬레이션 자체는 멈추지 않는다. '● LIVE 복귀'로 현재로 돌아옴.
-    #  (2) 시뮬레이션 정지/완료: 진행바와 ▶Play 로 기록을 비디오처럼 재생.
+    # Two situations are distinguished.
+    #  (1) Simulation running in real time (LIVE): the simulation thread keeps running.
+    #      Grabbing the progress bar enters 'review' mode, which only displays the snapshot at
+    #      that time; the simulation itself does not stop. '● Go LIVE' returns to the present.
+    #  (2) Simulation stopped/finished: the progress bar and ▶Play replay the recording like a video.
     #
     def _sim_running(self) -> bool:
         thread_live = self.sim_thread is not None and self.sim_thread.isRunning()
@@ -519,17 +519,17 @@ class SimulationApp:
         return thread_live or prod_live
 
     def on_go_live(self):
-        """과거 탐색을 끝내고 실시간 추적으로 복귀."""
+        """End past browsing and return to real-time tracking."""
         self._reviewing = False
         self.viewer.set_reviewing(False)
-        self.viewer.exit_playback_mode()   # update_animation 재개
+        self.viewer.exit_playback_mode()   # resume update_animation
         if self.app_mode == "production":
             self.viewer.statusBar().showMessage("Returned to LIVE computation tracking")
         else:
             self.viewer.statusBar().showMessage("Returned to LIVE simulation")
 
     def on_playback_toggled(self, playing: bool):
-        # 실시간 진행 중에는 ▶Play(과거 재생)를 사용하지 않는다.
+        # ▶Play (past replay) is not used while the simulation is running in real time.
         if self._sim_running():
             self.viewer.play_button.setChecked(False)
             return
@@ -577,7 +577,7 @@ class SimulationApp:
         self._render_snapshot_at(self._playback_clock)
 
     def on_timeline_scrubbed(self, frac: float):
-        """진행바 드래그 → 해당 비율 시점으로 화면 복원."""
+        """Progress-bar drag → restore the view at the corresponding fraction of the timeline."""
         rec = self.timeline_recorder
         if len(rec) == 0:
             return
@@ -585,20 +585,20 @@ class SimulationApp:
         self._playback_clock = t
 
         if self._sim_running():
-            # 실시간 진행 중: 시뮬레이션은 그대로 두고 '과거 보기'만 한다.
+            # Running in real time: leave the simulation alone and only 'review' the past.
             self._reviewing = True
             self.viewer.set_reviewing(True)
             self._render_snapshot_at(t)
             self.viewer.statusBar().showMessage(
-                "과거 탐색 중 — 시뮬레이션은 계속 진행됩니다. '● LIVE 복귀'로 현재로 돌아갑니다."
+                "Reviewing the past — the simulation keeps running. Press '● Go LIVE' to return to the present."
             )
         else:
-            # 정지/완료 상태: 일반 재생 스크럽
+            # Stopped/finished: ordinary playback scrubbing
             self._stop_playback()
             self._render_snapshot_at(t)
 
     def _render_snapshot_at(self, sim_time: float):
-        """주어진 sim-time 의 스냅샷을 화면에 반영한다."""
+        """Render the snapshot at the given sim-time."""
         rec = self.timeline_recorder
         snap = rec.at(sim_time)
         if snap is None:
@@ -615,21 +615,21 @@ class SimulationApp:
             self.viewer.render_logistics_snapshot(snap)
 
     def _on_live_follow_tick(self):
-        """실시간 진행 중, 과거 탐색이 아닐 때 진행바를 현재 시각에 맞춘다."""
+        """While running live and not reviewing, align the progress bar with the current time."""
         if self._reviewing or not self._sim_running():
             return
         rec = self.timeline_recorder
         if len(rec) == 0:
             return
         if self.app_mode == "production":
-            # 생산: 계산이 빠르게 끝나므로 진행바는 기록 끝(현재까지)을 가리킨다.
+            # Production: the computation finishes quickly, so the bar points at the end of the recording so far.
             now_t = rec.duration
             label_days = True
         else:
             now_t = self.ds.main_clock
             label_days = False
         span = (rec.duration - rec.start_time) or 1.0
-        # 물류는 전체 sim_duration 기준으로 진행바를 표시
+        # Logistics shows the progress bar relative to the full sim_duration
         if self.app_mode != "production":
             total = self.sim_duration or rec.duration or 1.0
             frac = now_t / total
@@ -637,7 +637,7 @@ class SimulationApp:
             frac = (now_t - rec.start_time) / span
         self.viewer.set_timeline_position(frac, now_t, label_days=label_days)
 
-    # ── 통합: 생산 시뮬레이션 실행 ────────────────────────────
+    # ── Integrated: run the production simulation ─────────────
     def start_production_simulation(self):
         if not _PROD_RUNNER_AVAILABLE:
             self.viewer.statusBar().showMessage("Production runner unavailable (import failed).")
@@ -645,7 +645,7 @@ class SimulationApp:
         if self.production_runner and self.production_runner.isRunning():
             return
 
-        # 패널 상주 Run Options 에서 바로 읽는다 (Run 시점 다이얼로그 없음)
+        # Read directly from the panel-resident Run Options (no dialog at Run time)
         opts = self.viewer.get_production_options()
         if opts is None:
             QMessageBox.warning(
@@ -665,11 +665,11 @@ class SimulationApp:
         self.production_params = params
         self._stop_playback()
         self._playback_clock = 0.0
-        # 상태바 우측에 선택된 데이터셋 표시
+        # Show the selected dataset at the right of the status bar
         self._update_production_run_info()
 
-        # 결과 우선(fast) 모드: 스냅샷 간격을 매우 크게 잡아 시작/종료만 기록.
-        # → 루프 오버헤드가 사라져 원본 PySCFabSim 속도로 계산, 결과는 즉시 표시.
+        # Results-first (fast) mode: use a very large snapshot interval so only start/end are recorded.
+        # → The loop overhead disappears, computation runs at native PySCFabSim speed, results show immediately.
         fast = bool(getattr(params, "fast_mode", True))
         snap_days = float(params.days) * 10.0 if fast else 0.5
 
@@ -686,7 +686,7 @@ class SimulationApp:
         if self.viewer.production_dashboard:
             self.viewer.production_dashboard.reset()
         self.production_runner.start()
-        # 통합: 생산 계산도 백그라운드 진행 → LIVE 상태로 표시
+        # Integrated: production computation also runs in the background → shown as LIVE
         self._reviewing = False
         self.viewer.set_reviewing(False)
         self.viewer.set_live_running(True)
@@ -696,7 +696,7 @@ class SimulationApp:
         self.viewer.statusBar().showMessage(f"Starting production simulation... ({mode_msg})")
 
     def _on_production_progress(self, days, done, active):
-        # 과거 탐색 중이 아닐 때만 최신 스냅샷을 대시보드에 반영
+        # Push the latest snapshot to the dashboard only when not reviewing the past
         if self._reviewing:
             return
         if self.viewer.production_dashboard:
@@ -705,7 +705,7 @@ class SimulationApp:
                 self.viewer.production_dashboard.set_snapshot(snap)
 
     def _on_production_results(self, summary: dict):
-        """계산 완료 즉시 결과 요약을 대시보드 표에 표시하고 파일로 저장."""
+        """Show the result summary in the dashboard tables right after computation, and save it to files."""
         if self.viewer.production_dashboard:
             self.viewer.production_dashboard.set_results(summary)
         saved_dir = None
@@ -720,19 +720,19 @@ class SimulationApp:
         )
 
     def _save_production_results(self, summary: dict) -> str:
-        """생산 결과를 logs/production/<timestamp>/ 에 저장한다.
+        """Save production results under logs/production/<timestamp>/.
 
-        저장 파일:
-          - summary.json          : 전체 요약(파라미터 포함)
-          - lot_summary.csv       : Lot 유형별 집계
-          - machine_summary.csv   : 머신 family 가동률
-          - lot_detail.csv        : Lot 단위 상세 통계
-        반환: 저장 폴더 경로
+        Files written:
+          - summary.json          : overall summary (including parameters)
+          - lot_summary.csv       : aggregates per lot type
+          - machine_summary.csv   : machine family utilization
+          - lot_detail.csv        : per-lot detailed statistics
+        Returns: path of the output folder
         """
         import os, csv, json
         run_dir = self._make_run_dir("production")
 
-        # 1) summary.json (lot_stats_detail 은 별도 CSV 로 빼고 JSON 에는 제외)
+        # 1) summary.json (lot_stats_detail goes to a separate CSV and is excluded from the JSON)
         summary_for_json = {k: v for k, v in summary.items() if k != "lot_stats_detail"}
         with open(os.path.join(run_dir, "summary.json"), "w", encoding="utf-8") as f:
             json.dump(summary_for_json, f, indent=2, ensure_ascii=False)
@@ -747,7 +747,7 @@ class SimulationApp:
                 w.writerow([r["lot_type"], r["throughput"], r["avg_cycle_time_days"],
                             r["on_time_pct"], r["avg_tardiness_days"]])
 
-        # 3) machine_summary.csv (가동률 + Run-down time)
+        # 3) machine_summary.csv (utilization + Run-down time)
         machines = summary.get("machines", [])
         with open(os.path.join(run_dir, "machine_summary.csv"), "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
@@ -764,7 +764,7 @@ class SimulationApp:
                     r.get("pm_count", 0), r.get("pm_time_s", 0),
                 ])
 
-        # 4) lot_detail.csv (lot_id 단위)
+        # 4) lot_detail.csv (per lot_id)
         detail = summary.get("lot_stats_detail", {}) or {}
         with open(os.path.join(run_dir, "lot_detail.csv"), "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
@@ -807,7 +807,7 @@ class SimulationApp:
         return run_dir
 
     def _extract_production_timeseries(self) -> list:
-        """timeline recorder 의 production 스냅샷에서 시계열 지표를 추출한다."""
+        """Extract time-series metrics from the production snapshots of the timeline recorder."""
         rec = getattr(self, "timeline_recorder", None)
         if rec is None:
             return []
@@ -827,13 +827,13 @@ class SimulationApp:
         return out
 
     def _save_production_graphs(self, run_dir: str, summary: dict, series: list):
-        """생산 결과를 PNG 그래프로 저장한다 (matplotlib, GUI 백엔드 비사용)."""
+        """Save production results as PNG graphs (matplotlib, no GUI backend)."""
         import os
         import matplotlib
-        matplotlib.use("Agg")  # GUI 스레드와 충돌 방지
+        matplotlib.use("Agg")  # avoid conflicts with the GUI thread
         import matplotlib.pyplot as plt
 
-        # (a) WIP / Throughput / Downtime 시계열
+        # (a) WIP / Throughput / Downtime time series
         if series:
             t = [r["time_days"] for r in series]
             wip = [r["wip"] for r in series]
@@ -861,7 +861,7 @@ class SimulationApp:
             fig.savefig(os.path.join(run_dir, "timeseries.png"), dpi=120)
             plt.close(fig)
 
-        # (b) 머신 family 별 가동률 & 다운타임 (막대)
+        # (b) Utilization & downtime per machine family (bars)
         machines = summary.get("machines", []) or []
         if machines:
             fams = [str(r["family"]) for r in machines]
@@ -882,7 +882,7 @@ class SimulationApp:
             fig.savefig(os.path.join(run_dir, "machine_util.png"), dpi=120)
             plt.close(fig)
 
-        # (c) Lot 유형별 처리량 & 정시 납기율
+        # (c) Throughput & on-time delivery rate per lot type
         per_lot = summary.get("per_lot", []) or []
         if per_lot:
             names = [str(r["lot_type"]) for r in per_lot]
@@ -908,7 +908,7 @@ class SimulationApp:
     def _on_production_finished(self):
         rec = self.timeline_recorder
         self.viewer.set_timeline_bounds(rec.start_time, rec.duration)
-        # 계산 종료 → LIVE 해제, 재생 모드로 전환
+        # Computation finished → leave LIVE, switch to playback mode
         self._live_follow_timer.stop()
         self.viewer.set_live_running(False)
         self._reviewing = False
@@ -918,7 +918,7 @@ class SimulationApp:
 
         fast = bool(getattr(self.production_params, "fast_mode", True))
         if fast:
-            # 결과 우선 모드: 재생 기록이 없으므로 진행바/Play 비활성화
+            # Results-first mode: no playback recording, so disable the progress bar/Play
             self.viewer.set_timeline_enabled(False)
             self.viewer.statusBar().showMessage(
                 "Production simulation complete — see the result tables. "
@@ -935,10 +935,10 @@ class SimulationApp:
 
     @staticmethod
     def _validate_production_dataset(path: str):
-        """PySCFabSim 데이터셋 폴더 유효성 검사.
+        """Validate a PySCFabSim dataset folder.
 
-        반환: (ok: bool, message: str)
-        필수 .txt 파일과 최소 1개의 route_*.txt 가 있어야 한다.
+        Returns: (ok: bool, message: str)
+        The required .txt files and at least one route_*.txt must be present.
         """
         import os
         required = [
@@ -951,13 +951,13 @@ class SimulationApp:
         missing = [f for f in required if f not in existing]
         has_route = any(f.startswith("route_") and f.endswith(".txt") for f in existing)
         if not has_route:
-            missing.append("route_*.txt (1개 이상)")
+            missing.append("route_*.txt (at least one)")
         if missing:
             return False, "Missing required files:\n  - " + "\n  - ".join(missing)
         return True, "Valid dataset"
 
     def on_production_add_dataset(self):
-        """패널의 'Add dataset folder…' — 외부 데이터셋 폴더 선택 + 검증."""
+        """Panel's 'Add dataset folder…' — pick an external dataset folder and validate it."""
         folder = QFileDialog.getExistingDirectory(
             self.viewer,
             "Select production dataset folder (must contain tool.txt.1l, fromto.txt, ...)",
@@ -976,9 +976,9 @@ class SimulationApp:
         self.viewer.add_production_dataset(folder)
 
     def _on_sim_finished(self):
-        """시뮬레이션 완료 시 메인 스레드에서 호출되는 슬롯."""
+        """Slot called on the main thread when the simulation finishes."""
         if self.replay_recorder is not None:
-            # 재생 모드 완료: 스레드가 이미 finalize(파일 저장+Rerun 뷰어) 완료
+            # Replay mode finished: the thread has already finalized (saved files + opened the Rerun viewer)
             out_dir = self.replay_recorder.out_dir
             self.replay_recorder = None
             self._live_follow_timer.stop()
@@ -993,7 +993,7 @@ class SimulationApp:
             )
             return
         self._save_logs()
-        # 통합: LIVE 해제 → 재생(과거 탐색) 모드로 전환
+        # Integrated: leave LIVE → switch to playback (past-browsing) mode
         self._live_follow_timer.stop()
         self.viewer.set_live_running(False)
         self._reviewing = False
@@ -1007,9 +1007,9 @@ class SimulationApp:
             f"Lots: {processed}/{total} | replay past via ▶Play or the progress bar"
         )
 
-    # ── 시뮬레이션 제어 ────────────────────────────────────────
+    # ── Simulation control ────────────────────────────────────
     def start_simulation(self):
-        # 통합: 생산 모드면 생산 러너로 분기
+        # Integrated: in production mode, branch to the production runner
         if self.app_mode == "production":
             self.start_production_simulation()
             return
@@ -1019,7 +1019,7 @@ class SimulationApp:
 
         if not self.ds.sections:
             self.viewer.statusBar().showMessage(
-                "Section이 없습니다. 레이아웃을 먼저 로딩하세요."
+                "No sections. Load a layout first."
             )
             return
 
@@ -1027,7 +1027,7 @@ class SimulationApp:
             self.viewer.statusBar().showMessage("Please load a FromTo file first.")
             return
 
-        # 패널 상주 Run Options 에서 바로 읽는다 (Run 시점 다이얼로그 없음)
+        # Read directly from the panel-resident Run Options (no dialog at Run time)
         settings = self.viewer.get_logistics_options()
         num_oht = settings["num_oht"]
         self.sim_duration            = float(settings["duration"])
@@ -1038,13 +1038,13 @@ class SimulationApp:
         if custom_strategies is None:
             return
 
-        # 실행 방식: live(실시간 애니메이션) / replay(전속력 기록 → Rerun 재생)
+        # Run mode: live (real-time animation) / replay (full-speed recording → Rerun playback)
         self.replay_recorder = None
         if settings.get("run_mode") == "replay":
             from ufast.viz.replay_recorder import ReplayRecorder
             self.replay_recorder = ReplayRecorder(self.ds, self.sim_duration)
 
-        # ── 초기화 ──────────────────────────────────────────────
+        # ── Initialization ────────────────────────────────────
         self.ds.main_clock             = 0.0
         self.ds.event_queue.clear()
         self.ds.oht_list.clear()
@@ -1054,7 +1054,7 @@ class SimulationApp:
         self._last_deadlock_check      = -9999.0
         self._last_status_update       = -9999.0
 
-        # 통합: 타임라인 기록 초기화 (물류는 1 sim-sec 간격)
+        # Integrated: reset the timeline recording (logistics uses a 1 sim-sec interval)
         self._stop_playback()
         self.viewer.exit_playback_mode()
         self._playback_clock = 0.0
@@ -1065,7 +1065,7 @@ class SimulationApp:
             for buf in sec.oht_buffers:
                 buf.buffer = [None] * buf.capacity
 
-        # ── 컨트롤러 ────────────────────────────────────────────
+        # ── Controllers ───────────────────────────────────────
         self.vehicle_controller = VehicleController(
             num_oht, self.route_manager, self.bridge
         )
@@ -1079,10 +1079,10 @@ class SimulationApp:
             setter = getattr(self.route_manager, "set_custom_cost_function", None)
             if callable(setter):
                 setter(custom_strategies.get("routing_cost"))
-                print(f"[main_ui] ✅ 커스텀 routing cost function 적용: "
+                print(f"[main_ui] ✅ Custom routing cost function applied: "
                       f"{describe_strategy(custom_strategies.get('routing_cost'))}")
             else:
-                print("[main_ui] ⚠️ 현재 RouteManager가 routing cost function 주입을 지원하지 않습니다.")
+                print("[main_ui] ⚠️ The current RouteManager does not support injecting a routing cost function.")
 
         if self.route_manager and self.bridge:
             self.vehicle_controller.dispatcher = Dispatcher(
@@ -1090,7 +1090,7 @@ class SimulationApp:
                 self.bridge,
                 strategy=NearestIdleStrategy(),
             )
-            print("[main_ui] ✅ Dispatcher 초기화 완료 (NearestIdleStrategy)")
+            print("[main_ui] ✅ Dispatcher initialized (NearestIdleStrategy)")
 
         self.event_handler = EventHandler(self.vehicle_controller)
         self.event_handler.set_idle_positioning_strategy(custom_strategies.get("idle_positioning"))
@@ -1098,7 +1098,7 @@ class SimulationApp:
         self.event_handler.default_processing_time = self.default_processing_time
         self.event_handler.init_lot_events(self.fromto_data, self.sim_duration)
 
-        # ── 로거 ────────────────────────────────────────────────
+        # ── Loggers ───────────────────────────────────────────
         logger = get_logger()
         logger.reset(num_oht, self.sim_duration)
         for oht_id in self.ds.oht_list:
@@ -1107,16 +1107,16 @@ class SimulationApp:
         if _ROUTE_PKG_AVAILABLE and get_logistics_logger:
             logi_log = get_logistics_logger()
             logi_log.reset()
-            print("[main_ui] ✅ 물류 로거(LogisticsLogger) 초기화 완료")
+            print("[main_ui] ✅ Logistics logger (LogisticsLogger) initialized")
 
         if self.event_handler:
             for oht in self.vehicle_controller.oht_list.values():
                 if oht.status == "IDLE":
                     self.event_handler._oht_idle_since[oht.name] = 0.0
             self.event_handler.reposition_idle_ohts(0.0)
-            print("[main_ui] ✅ 초기 IDLE OHT 즉시 재배치 시작")
+            print("[main_ui] ✅ Immediate repositioning of initially IDLE OHTs started")
 
-        # ── 스레드 시작 ─────────────────────────────────────────
+        # ── Start the thread ──────────────────────────────────
         self.sim_thread = SimulationThread(self)
         self.sim_thread.status_message.connect(
             self.viewer.statusBar().showMessage
@@ -1124,7 +1124,7 @@ class SimulationApp:
         self.sim_thread.sim_finished.connect(self._on_sim_finished)
         self.sim_thread.start()
 
-        # 통합: 실시간(LIVE) 상태 표시 + 진행바 자동 추종 시작
+        # Integrated: show LIVE status + start auto-following of the progress bar
         self._reviewing = False
         self.viewer.set_reviewing(False)
         self.viewer.set_live_running(True)
@@ -1133,8 +1133,8 @@ class SimulationApp:
         self._live_follow_timer.start()
 
         if self.replay_recorder is not None:
-            # 재생 모드: 라이브 애니메이션·타임라인 도크·결과 패널은 사용하지 않는다.
-            # (결과는 Rerun 뷰어와 Parquet 파일로 제공)
+            # Replay mode: the live animation, timeline dock, and results panel are not used.
+            # (Results are provided through the Rerun viewer and Parquet files)
             self.viewer._playback_mode = True
             self.viewer.set_timeline_enabled(False)
             self._live_follow_timer.stop()
@@ -1145,7 +1145,7 @@ class SimulationApp:
                 f"frame step {self.replay_recorder.frame_step:.1f}s"
             )
         else:
-            # 실시간(Live) 모드: 통계·범례 결과 패널 표시
+            # Real-time (Live) mode: show the statistics/legend results panel
             self.viewer.results_dock.show()
             self.viewer.statusBar().showMessage(
                 f"Simulation started: {num_oht} OHTs, {self.ds.lot_count} lots"
@@ -1154,22 +1154,22 @@ class SimulationApp:
     def stop_simulation(self):
         if self.sim_thread and self.sim_thread.isRunning():
             self.sim_thread.request_stop()
-            # 재생 모드는 중단 시 finalize(파일 저장) 시간이 더 필요하다
+            # Replay mode needs extra time to finalize (save files) when stopped
             self.sim_thread.wait(15000 if self.replay_recorder is not None else 3000)
         if self.replay_recorder is not None:
             self.replay_recorder = None
             self.viewer.exit_playback_mode()
-        # 통합: 생산 러너도 안전하게 중단
+        # Integrated: also stop the production runner safely
         if self.production_runner and self.production_runner.isRunning():
             self.production_runner.request_stop()
             self.production_runner.wait(5000)
-        # 통합: LIVE/재생 상태 정리
+        # Integrated: clean up LIVE/playback state
         self._live_follow_timer.stop()
         self.viewer.set_live_running(False)
         self._reviewing = False
         self.viewer.set_reviewing(False)
         self._stop_playback()
-        # 정지 후에도 기록이 있으면 진행바로 과거 재생 가능
+        # After stopping, the recording (if any) can still be replayed via the progress bar
         rec = self.timeline_recorder
         if len(rec) > 0:
             self.viewer.set_timeline_bounds(rec.start_time, rec.duration)
@@ -1183,7 +1183,7 @@ class SimulationApp:
         self.event_handler      = None
         if self.bridge:
             self.bridge.reset_penalties()
-        # 통합: 타임라인 / 재생 상태 초기화
+        # Integrated: reset timeline / playback state
         self._stop_playback()
         self.viewer.exit_playback_mode()
         self._playback_clock = 0.0
@@ -1195,7 +1195,7 @@ class SimulationApp:
         if self.viewer.production_dashboard:
             self.viewer.production_dashboard.reset()
 
-    # ── 커스텀 전략 설정 다이얼로그 (패널의 Custom strategies… 버튼) ──
+    # ── Custom strategy settings dialog (panel's Custom strategies… button) ──
     def open_strategy_dialog(self):
         dialog = QDialog(self.viewer)
         dialog.setWindowTitle("Custom Strategy Settings")
@@ -1223,7 +1223,7 @@ class SimulationApp:
         for kind, path in strategy_paths.items():
             if path and not path.lower().endswith((".py", ".pkl", ".pickle")):
                 QMessageBox.warning(
-                    self.viewer, "전략 파일 오류",
+                    self.viewer, "Strategy File Error",
                     f"{StrategyConfigDialog._LABELS[kind]} only accepts "
                     f".py, .pkl, or .pickle files.",
                 )
@@ -1244,7 +1244,7 @@ class SimulationApp:
                 continue
             try:
                 loaded[kind] = load_strategy(path, kind)
-                print(f"[main_ui] ✅ 커스텀 {kind} 전략 로드: "
+                print(f"[main_ui] ✅ Custom {kind} strategy loaded: "
                       f"{describe_strategy(loaded[kind])} ({path})")
             except StrategyLoadError as e:
                 QMessageBox.warning(self.viewer, "Strategy Load Failed", str(e))
@@ -1255,11 +1255,11 @@ class SimulationApp:
         return loaded
 
     def _make_run_dir(self, mode: str, base: str = "logs") -> str:
-        """결과 저장용 타임스탬프 폴더를 만든다.
+        """Create a timestamped folder for saving results.
 
-        구조: logs/<mode>/<YYYY-MM-DD_HH-MM-SS>/
-        - mode: "logistics" 또는 "production"
-        반환: 생성된 폴더의 절대경로
+        Structure: logs/<mode>/<YYYY-MM-DD_HH-MM-SS>/
+        - mode: "logistics" or "production"
+        Returns: absolute path of the created folder
         """
         import os
         from datetime import datetime
@@ -1271,7 +1271,7 @@ class SimulationApp:
     def _save_logs(self, log_dir: str = "logs"):
         import os
         try:
-            # logs/logistics/<timestamp>/ 아래에 누적 저장
+            # Accumulate under logs/logistics/<timestamp>/
             output_dir = self._make_run_dir("logistics", base=log_dir)
 
             logger      = get_logger()
@@ -1315,7 +1315,7 @@ class SimulationApp:
         except Exception as e:
             QMessageBox.warning(self.viewer, "Save Failed", str(e))
 
-    # ── 파일 로딩 ──────────────────────────────────────────────
+    # ── File loading ──────────────────────────────────────────
     def _apply_layers(self, layers, skip_build=False):
         self.ds.layers = layers
         self.viewer.layer_panel.set_layers(layers)
@@ -1328,7 +1328,7 @@ class SimulationApp:
         parser = DXFParser()
         layers = parser.parse(filename)
         self._apply_layers(layers)
-        # DXF → rail 변환 작업에는 레이어 패널이 필요하므로 이때만 자동 표시
+        # The layer panel is needed for DXF → rail conversion, so show it automatically only here
         self.viewer.layer_panel.show()
         self.viewer.set_layout_file_label(os.path.basename(filename))
 
@@ -1349,14 +1349,14 @@ class SimulationApp:
 
                 node_count = len(self.route_manager.network.nodes)
                 sec_count  = len(self.route_manager.network.sections)
-                print(f"[main_ui] ✅ RouteManager 초기화 완료: 노드 {node_count}개, 섹션 {sec_count}개")
-                print(f"[main_ui] ✅ Bridge 초기화 완료: 섹션 {len(self.bridge.section_to_nodes)}개 매핑")
+                print(f"[main_ui] ✅ RouteManager initialized: {node_count} nodes, {sec_count} sections")
+                print(f"[main_ui] ✅ Bridge initialized: {len(self.bridge.section_to_nodes)} sections mapped")
             except Exception as e:
-                print(f"[main_ui] ⚠️  RouteManager 초기화 실패: {e} → 기존 Dijkstra 사용")
+                print(f"[main_ui] ⚠️  RouteManager initialization failed: {e} → using legacy Dijkstra")
                 self.route_manager = None
                 self.bridge        = None
         else:
-            print("[main_ui] route 패키지 없음 → 기존 Dijkstra 사용")
+            print("[main_ui] route package not available → using legacy Dijkstra")
 
     def save_rail_file(self, filename):
         if self.ds.layers:
@@ -1369,13 +1369,13 @@ class SimulationApp:
         self.fromto_filename = os.path.basename(filename)
         self.viewer.set_fromto_file_label(self.fromto_filename, count)
         self.viewer.statusBar().showMessage(f"FromTo loaded: {count} records")
-        # 물류 모드면 현재 From-To 차트를 상태바에 상시 표시
+        # In logistics mode, keep the current From-To chart shown on the status bar
         if self.app_mode == "logistics":
             self.viewer.set_run_info(
                 f"From-To: {self.fromto_filename} ({count} records)"
             )
 
-    # ── 레이어 / 속도 ──────────────────────────────────────────
+    # ── Layers / speed ────────────────────────────────────────
     def on_speed_changed(self, speed: float):
         self.sim_speed = speed
 

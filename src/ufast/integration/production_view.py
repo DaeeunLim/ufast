@@ -1,14 +1,14 @@
 """
 ProductionDashboard
 ===================
-생산 모드 전용 시각화 위젯.
+Visualisation widget dedicated to production mode.
 
-생산 시뮬레이터는 물류처럼 OHT 가 레일 위를 움직이는 공간 모델이 아니라
-머신/Lot 의 집계 지표(처리량, WIP, 가동률)로 표현된다. 따라서 중앙 화면을
-대시보드 형태로 구성한다.
+Unlike the AMHS, the production simulator is not a spatial model with OHTs moving
+on rails; it is expressed through aggregate machine/lot metrics (throughput, WIP,
+utilisation). The central screen is therefore laid out as a dashboard.
 
-타임라인 재생 시 set_snapshot() 으로 해당 시점의 Snapshot.metrics 를 받아
-지표 텍스트와 간단한 막대 게이지를 갱신한다.
+During timeline replay, set_snapshot() receives the Snapshot.metrics of that
+moment and refreshes the metric text and simple bar gauges.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from ufast.integration.timeline import Snapshot
 
 
 class _Gauge(QFrame):
-    """0~1 비율 막대 게이지."""
+    """Bar gauge for a 0..1 ratio."""
 
     def __init__(self, color="#32CD32", parent=None):
         super().__init__(parent)
@@ -69,7 +69,7 @@ class _Gauge(QFrame):
 
 
 class ProductionDashboard(QWidget):
-    """생산 시뮬레이션 결과를 시점별로 보여주는 대시보드."""
+    """Dashboard showing production simulation results at a given moment."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,7 +96,7 @@ class ProductionDashboard(QWidget):
         title.setFont(tf)
         root.addWidget(title)
 
-        # 현재 데이터셋 표시 (실행 전/중/후 항상 보임)
+        # Current dataset display (always visible before/during/after a run)
         self.dataset_label = QLabel("Dataset: (not selected)")
         dsf = QFont()
         dsf.setPointSize(12)
@@ -111,7 +111,7 @@ class ProductionDashboard(QWidget):
         self.time_label.setFont(df)
         root.addWidget(self.time_label)
 
-        # ── 지표 그리드 ──
+        # ── Metrics grid ──
         metrics_group = QGroupBox("Lot Metrics")
         grid = QGridLayout(metrics_group)
         self._metric_labels = {}
@@ -136,7 +136,7 @@ class ProductionDashboard(QWidget):
             self._metric_labels[key] = val
         root.addWidget(metrics_group)
 
-        # ── 게이지 ──
+        # ── Gauges ──
         gauge_group = QGroupBox("Progress / Utilization")
         gl = QVBoxLayout(gauge_group)
 
@@ -153,7 +153,7 @@ class ProductionDashboard(QWidget):
         self.machine_label = QLabel("Machines: -")
         root.addWidget(self.machine_label)
 
-        # ── 결과 요약 테이블 (계산 완료 즉시 표시) ──
+        # ── Result summary tables (shown as soon as computation finishes) ──
         self.result_group = QGroupBox("Result Summary (shown on completion)")
         rg = QVBoxLayout(self.result_group)
 
@@ -161,7 +161,7 @@ class ProductionDashboard(QWidget):
         self.result_header.setStyleSheet("color:#888;")
         rg.addWidget(self.result_header)
 
-        # ── 추가 생산 KPI 요약 (WIP / Run-down time) ──
+        # ── Additional production KPI summary (WIP / run-down time) ──
         kpi_grid = QGridLayout()
         self._result_kpi_labels = {}
         kpi_rows = [
@@ -218,7 +218,7 @@ class ProductionDashboard(QWidget):
         self.hint_label.setWordWrap(True)
         root.addWidget(self.hint_label)
 
-    # ── 갱신 ────────────────────────────────────────────────
+    # ── Updates ─────────────────────────────────────────────
     def set_snapshot(self, snap: Optional[Snapshot]):
         if snap is None:
             return
@@ -248,11 +248,11 @@ class ProductionDashboard(QWidget):
         )
 
     def set_dataset_info(self, text: str):
-        """현재 데이터셋 정보를 대시보드 상단에 표시."""
+        """Show the current dataset info at the top of the dashboard."""
         self.dataset_label.setText(text)
 
     def set_results(self, summary: dict):
-        """계산 완료 즉시 호출 — 결과 요약을 표에 채운다."""
+        """Called as soon as computation finishes — fills the tables with the result summary."""
         self.result_header.setStyleSheet("color:#fff;")
         self.result_header.setText(
             f"Dataset {summary.get('dataset')} | {summary.get('days')} days | "
@@ -278,7 +278,7 @@ class ProductionDashboard(QWidget):
             self.machine_table.setItem(i, 3, QTableWidgetItem(f"{row.get('avg_downtime_s', 0) / 3600:.2f}"))
             self.machine_table.setItem(i, 4, QTableWidgetItem(f"{row.get('downtime_pct', 0):.2f}"))
 
-        # ── WIP / Run-down time 요약 채우기 ──
+        # ── Fill the WIP / run-down time summary ──
         wip = summary.get("wip", {}) or {}
         down = summary.get("downtime", {}) or {}
         kpi_vals = {

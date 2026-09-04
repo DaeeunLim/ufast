@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 
 class StrategyLoadError(Exception):
-    """커스텀 전략 파일 로딩/호출 중 발생하는 예외."""
+    """Exception raised while loading or invoking a custom strategy file."""
 
 
 _KIND_CONFIG = {
@@ -108,7 +108,7 @@ _KIND_CONFIG = {
 
 
 def describe_strategy(strategy: Any) -> str:
-    """로그/상태 메시지에 표시할 전략 이름."""
+    """Strategy name to display in log/status messages."""
     if strategy is None:
         return "Default"
     cls = getattr(strategy, "__class__", None)
@@ -123,27 +123,27 @@ def describe_strategy(strategy: Any) -> str:
 
 def load_strategy(path: str, kind: str) -> Any:
     """
-    .py / .pkl / .pickle 전략 파일을 로드한다.
+    Load a .py / .pkl / .pickle strategy file.
 
-    Python 파일은 아래 순서로 엔트리포인트를 찾는다.
+    For Python files the entry point is searched in the following order.
       1) create_*_strategy(), create_strategy(), get_strategy(), load_strategy()
-      2) *_strategy 또는 strategy 변수
-      3) *Strategy 클래스
-      4) kind별 함수(get_route/select/plan_reposition 등)
+      2) a *_strategy or strategy variable
+      3) a *Strategy class
+      4) a kind-specific function (get_route/select/plan_reposition, etc.)
     """
     if kind not in _KIND_CONFIG:
-        raise StrategyLoadError(f"지원하지 않는 전략 종류입니다: {kind}")
+        raise StrategyLoadError(f"Unsupported strategy kind: {kind}")
 
     normalized = os.path.abspath(os.path.expanduser(path))
     if not os.path.exists(normalized):
-        # 사용자 전략 보관 폴더(<repo>/strategies/)에서 한 번 더 찾는다.
+        # Look once more in the user strategy folder (<repo>/strategies/).
         from ufast.paths import REPO_ROOT
         candidate = os.path.join(REPO_ROOT, "strategies", path)
         if os.path.exists(candidate):
             normalized = candidate
         else:
             raise StrategyLoadError(
-                f"파일을 찾을 수 없습니다: {normalized} (strategies/ 폴더에도 없음)")
+                f"File not found: {normalized} (also not in the strategies/ folder)")
 
     ext = Path(normalized).suffix.lower()
     if ext == ".py":
@@ -153,10 +153,10 @@ def load_strategy(path: str, kind: str) -> Any:
         with open(normalized, "rb") as f:
             strategy = pickle.load(f)
     else:
-        raise StrategyLoadError(".py, .pkl, .pickle 파일만 지원합니다.")
+        raise StrategyLoadError("Only .py, .pkl, and .pickle files are supported.")
 
     if strategy is None:
-        raise StrategyLoadError(f"전략 객체를 만들지 못했습니다: {normalized}")
+        raise StrategyLoadError(f"Failed to create the strategy object: {normalized}")
     return strategy
 
 
@@ -164,7 +164,7 @@ def _load_module_from_py(path: str) -> ModuleType:
     module_name = f"custom_strategy_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise StrategyLoadError(f"파이썬 모듈 로딩 실패: {path}")
+        raise StrategyLoadError(f"Failed to load Python module: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -198,15 +198,15 @@ def _extract_strategy_from_module(module: ModuleType, kind: str) -> Any:
             return fn
 
     raise StrategyLoadError(
-        f"모듈에서 {kind} 전략 엔트리포인트를 찾지 못했습니다. "
-        f"factory 함수, strategy 변수, Strategy 클래스, 또는 지정 함수명을 사용하세요."
+        f"Could not find a {kind} strategy entry point in the module. "
+        f"Use a factory function, a strategy variable, a Strategy class, or the designated function name."
     )
 
 
 def _call_variants(func, call_specs: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
     """
-    사용자 전략 함수가 받을 수 있는 인자 조합을 순차 시도한다.
-    TypeError가 발생하면 다음 시그니처를 시도한다.
+    Try the argument combinations a user strategy function may accept, in order.
+    On TypeError, the next signature is tried.
     """
     last_error: Optional[Exception] = None
     for args, kwargs in call_specs:
@@ -228,7 +228,7 @@ def invoke_assignment_strategy(
     bridge: Any,
     vehicle_controller: Any,
 ) -> Any:
-    """Assignment 전략 호출. 반환값은 OHT 객체 또는 OHT 이름이면 된다."""
+    """Invoke the assignment strategy. The return value may be an OHT object or an OHT name."""
     if strategy is None:
         return None
 
@@ -238,7 +238,7 @@ def invoke_assignment_strategy(
     if not callable(func) and callable(strategy):
         func = strategy
     if not callable(func):
-        raise StrategyLoadError("Assignment 전략은 select()/dispatch() 메서드 또는 callable 이어야 합니다.")
+        raise StrategyLoadError("An assignment strategy must have a select()/dispatch() method or be callable.")
 
     return _call_variants(func, [
         ((), {
@@ -261,7 +261,7 @@ def invoke_routing_strategy(
     to_sec_id: int,
     vehicle_controller: Any,
 ) -> Any:
-    """Routing 전략 호출. 반환값은 section id path 또는 dict/tuple 형태도 허용한다."""
+    """Invoke the routing strategy. The return value may be a section id path, or a dict/tuple."""
     if strategy is None:
         return None
 
@@ -271,7 +271,7 @@ def invoke_routing_strategy(
     if not callable(func) and callable(strategy):
         func = strategy
     if not callable(func):
-        raise StrategyLoadError("Routing 전략은 get_route()/route() 메서드 또는 callable 이어야 합니다.")
+        raise StrategyLoadError("A routing strategy must have a get_route()/route() method or be callable.")
 
     return _call_variants(func, [
         ((), {
@@ -328,7 +328,7 @@ def invoke_idle_positioning_strategy(
     event_handler: Any,
     vehicle_controller: Any,
 ) -> Any:
-    """Idle Positioning 전략 호출. 반환값은 target section/node 또는 section path면 된다."""
+    """Invoke the idle positioning strategy. The return value may be a target section/node or a section path."""
     if strategy is None:
         return None
 
@@ -339,7 +339,7 @@ def invoke_idle_positioning_strategy(
         func = strategy
     if not callable(func):
         raise StrategyLoadError(
-            "Idle Positioning 전략은 plan_reposition()/pick_target() 메서드 또는 callable 이어야 합니다."
+            "An idle positioning strategy must have a plan_reposition()/pick_target() method or be callable."
         )
 
     return _call_variants(func, [
@@ -360,7 +360,7 @@ def invoke_idle_positioning_strategy(
 
 
 def normalize_oht_selection(selection: Any, oht_dict: dict[str, Any]) -> Optional[str]:
-    """전략 반환값을 OHT 이름으로 정규화한다."""
+    """Normalize a strategy return value to an OHT name."""
     if selection is None:
         return None
     if isinstance(selection, str):
@@ -373,15 +373,15 @@ def normalize_oht_selection(selection: Any, oht_dict: dict[str, Any]) -> Optiona
 
 def normalize_section_path(result: Any, from_sec_id: Optional[int] = None) -> Optional[list[int]]:
     """
-    사용자 routing/idle 전략 반환값을 section id 리스트로 정규화한다.
+    Normalize a user routing/idle strategy return value to a list of section ids.
 
-    허용 예:
+    Accepted examples:
       - [12, 13, 14]
       - {"path": [12, 13, 14]}
       - {"section_path": [12, 13, 14]}
       - ([12, 13, 14], cost)
 
-    반환 path는 기존 컨트롤러 규칙에 맞게 현재 섹션을 제외한다.
+    The returned path excludes the current section, following the existing controller convention.
     """
     if result is None:
         return None

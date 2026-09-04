@@ -1,24 +1,24 @@
-# src/ufast/drawing — CAD 도형 데이터 모델
+# src/ufast/drawing — CAD figure data model
 
-## 역할
+## Role
 
-도면(DXF/.rail) 세계의 **CAD 도형 dataclass**만 담는 최하위 계층. 직선·원·텍스트·2차 베지어와 레이어를 표현하며, 파서(`common/dxf_parser`·`common/rail_io`)가 이 도형들을 만들고 레이아웃 변환(`layout/rail_manager`)과 GUI 렌더링(`gui/viewer`)이 소비한다. 원래 `src/ufast/core/geometry.py`였으나 시뮬레이션 엔티티(`core`)와 도면 표현을 분리하기 위해 독립 패키지로 이동했다 (2026-08-05).
+The lowest layer, holding only the **CAD figure dataclasses** of the drawing (DXF/.rail) world. It represents lines, circles, text, quadratic Bezier curves, and layers; the parsers (`common/dxf_parser`, `common/rail_io`) create these figures, and the layout conversion (`layout/rail_manager`) and GUI rendering (`gui/viewer`) consume them. It was originally `src/ufast/core/geometry.py` but was moved into a separate package to separate the simulation entities (`core`) from the drawing representation (2026-08-05).
 
-> `__init__.py` 없음 (암묵적 네임스페이스 패키지).
+> Regular package (`__init__.py` present).
 
-## 파일별 역할
+## Files
 
-| 파일 | 핵심 클래스 | 역할 |
+| File | Key classes | Role |
 |---|---|---|
-| `geometry.py` | `Figure`, `CLine`, `CCircle`, `CText`, `CQuadCurve`, `CLayer`, `FigureBlock` | CAD 도형 dataclass — 직선, 원, 텍스트(EQ 이름 추출용), 2차 베지어, 레이어(`is_rail_layer` 플래그) |
+| `geometry.py` | `Figure`, `CLine`, `CCircle`, `CText`, `CQuadCurve`, `CLayer`, `FigureBlock` | CAD figure dataclasses — line, circle, text (used to extract EQ names), quadratic Bezier, layer (`is_rail_layer` flag) |
 
-## 사용처
+## Used by
 
-- `common/dxf_parser.py`·`common/rail_io.py` — DXF/.rail 파일을 파싱해 도형 생성
-- `layout/rail_manager.py` — 도형 → `Section` 그래프 변환
-- `core/components.py` — `Section.figures` 시각화 도형
-- `gui/viewer.py`·`gui/layer_dialog.py`, `viz/replay_recorder.py` — 렌더링·기록
+- `common/dxf_parser.py`, `common/rail_io.py` — parse DXF/.rail files and create figures
+- `layout/rail_manager.py` — figure → `Section` graph conversion
+- `core/components.py` — `Section.figures` visualization figures
+- `gui/viewer.py`, `gui/layer_dialog.py`, `viz/replay_recorder.py` — rendering and recording
 
-## 외부 의존
+## Dependencies
 
-표준 라이브러리만 사용 (`dataclasses`). 서드파티·PyQt 의존 없음.
+Standard library only (`dataclasses`). No third-party or PyQt dependencies.

@@ -1,10 +1,10 @@
 """
-커스텀 Assignment 전략 예시.
+Custom assignment strategy example.
 
-반환 규칙:
-- select(target_section_id, idle_ohts, route_manager, bridge, vehicle_controller)를 정의한다.
-- 반환값은 선택된 OHT 객체 또는 OHT 이름 문자열이다.
-- None을 반환하면 기존 기본 Assignment로 fallback된다.
+Return rules:
+- Define select(target_section_id, idle_ohts, route_manager, bridge, vehicle_controller).
+- The return value is the selected OHT object or the OHT name string.
+- Returning None falls back to the built-in default assignment.
 """
 
 
@@ -13,12 +13,12 @@ class AssignmentStrategy:
         if not idle_ohts:
             return None
 
-        # 같은 section에 있는 OHT를 최우선 선택
+        # Prefer an OHT that is already in the same section
         for oht in idle_ohts:
             if oht.current_section_id == target_section_id:
                 return oht
 
-        # bridge가 있으면 실제 route cost 기준 선택
+        # If a bridge is available, select by actual route cost
         if bridge is not None:
             best_oht = None
             best_cost = float("inf")
@@ -34,5 +34,5 @@ class AssignmentStrategy:
             if best_oht is not None:
                 return best_oht
 
-        # fallback: section id 차이가 가장 작은 OHT
+        # fallback: the OHT with the smallest section id difference
         return min(idle_ohts, key=lambda o: abs(o.current_section_id - target_section_id))

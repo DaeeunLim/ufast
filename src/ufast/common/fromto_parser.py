@@ -1,8 +1,8 @@
 """
-FromTo 파일 파서
-형식: 탭 구분 텍스트 — FromEQ\tToEQ\tRate(건/시간)
-세 번째 열은 시간 당 발생율(hourly occurrence rate, λ [건/시간, req/hr])이다.
-고정 간격(fixed interval) 시뮬레이션 시 발생 간격은 Δt = 3600.0 / rate (초)이다.
+FromTo file parser
+Format: tab-separated text — FromEQ\tToEQ\tRate(count/hour)
+The third column is the hourly occurrence rate (λ [count/hour, req/hr]).
+In fixed-interval simulation the inter-event spacing is Δt = 3600.0 / rate (seconds).
 """
 from collections import defaultdict
 from typing import Dict, Iterable, List, Tuple
@@ -10,8 +10,8 @@ from typing import Dict, Iterable, List, Tuple
 
 def load_fromto(filepath: str) -> List[Tuple[str, str, float]]:
     """
-    FromTo 파일을 읽어 (from_eq, to_eq, rate) 리스트를 반환한다.
-    rate는 시간 당 발생율(건/시간, req/hr)이다.
+    Read a FromTo file and return a list of (from_eq, to_eq, rate).
+    rate is the hourly occurrence rate (count/hour, req/hr).
     """
     records: List[Tuple[str, str, float]] = []
 
@@ -38,8 +38,8 @@ def group_fromto_rates(
     fromto_data: Iterable[Tuple[str, str, float]],
 ) -> Dict[Tuple[str, str], List[float]]:
     """
-    FromTo 레코드들을 (from_eq, to_eq) 쌍별 시간대별 발생율 리스트로 그룹화한다.
-    반환: {(from_eq, to_eq): [rate_h0, rate_h1, rate_h2, ...]}
+    Group FromTo records into per-(from_eq, to_eq) lists of hourly rates.
+    Returns: {(from_eq, to_eq): [rate_h0, rate_h1, rate_h2, ...]}
     """
     grouped: Dict[Tuple[str, str], List[float]] = defaultdict(list)
     for from_eq, to_eq, rate in fromto_data:
@@ -53,11 +53,11 @@ def generate_fixed_interval_events(
     offset_ratio: float = 0.5,
 ) -> List[Tuple[float, str, str]]:
     """
-    시간당 발생율(rate)을 기반으로 고정 간격(fixed interval: Δt = 3600/rate 초)의
-    이벤트 목록 [(timestamp_sec, from_eq, to_eq), ...] 을 생성한다.
+    Generate a fixed-interval (Δt = 3600/rate seconds) event list
+    [(timestamp_sec, from_eq, to_eq), ...] from the hourly rate.
 
-    - sim_duration: 시뮬레이션 기간 (초)
-    - offset_ratio: 첫 번째 이벤트의 오프셋 비율 (기본값 0.5: 간격의 중간 지점)
+    - sim_duration: simulation duration (seconds)
+    - offset_ratio: offset ratio of the first event (default 0.5: midpoint of the interval)
     """
     grouped = group_fromto_rates(fromto_data)
     events: List[Tuple[float, str, str]] = []

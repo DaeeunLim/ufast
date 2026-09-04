@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# E5 — queue(blocking) 모델 fleet sweep (HVLM, 논문 Figure 3 의 queue 판)
+# E5 — fleet sweep with the queue (blocking) model (HVLM, queue-model version of paper Figure 3)
 #
-# 목적 (2026-08-09):
-#   1. SoftwareX 재포지셔닝 — queue 모델을 대표 모델로 내세우려면 검증·fleet
-#      sweep 그림도 queue 모드 결과여야 한다.
-#   2. 포화 구간(5~20대) 데드락 강제해소(deadlock_forced) 건전성 검증 —
-#      기본 모델 전환의 전제조건.
+# Purpose (2026-08-09):
+#   1. SoftwareX repositioning — if the queue model is presented as the representative
+#      model, the validation and fleet-sweep figures must also come from queue-mode runs.
+#   2. Sanity check of forced deadlock resolution (deadlock_forced) in the saturated
+#      range (5-20 vehicles) — a prerequisite for switching the default model.
 #
-#   HVLM: OHT {5,10,15,20,25,50,100,200,300} × seed{0,1,2} = 27런
-#   E1/E3 와 동일한 180d 설계 (static 120d + settling 10d + 측정 50d).
+#   HVLM: OHT {5,10,15,20,25,50,100,200,300} × seed{0,1,2} = 27 runs
+#   Same 180d design as E1/E3 (static 120d + settling 10d + measurement 50d).
 #
-# 초포화 런은 이송 큐·차단 대기열이 커질 수 있어 병렬도 기본 4.
-# 사용: bash scripts/exp5_queue_fleet_sweep.sh [병렬도=4]
+# Heavily saturated runs can grow large transport/blocking queues, so parallelism defaults to 4.
+# Usage: bash scripts/exp5_queue_fleet_sweep.sh [parallelism=4]
 set -uo pipefail
 
 JOBS="${1:-4}"
@@ -49,6 +49,6 @@ rc=$?
 echo "[exp5] finished rc=$rc after $((($(date +%s) - start) / 60)) min"
 fails=$(grep -l Traceback "$LOGDIR"/*.log 2>/dev/null | wc -l)
 echo "[exp5] logs with Traceback: $fails"
-# 데드락 강제해소 요약 — 건전성 한눈에
+# Summary of forced deadlock resolutions — sanity at a glance
 echo "[exp5] deadlock_forced by run:"
 grep -h '"deadlock_forced"' "$ROOT"/results/*/HVLM_180d_*queue*.json 2>/dev/null | sort | uniq -c | head

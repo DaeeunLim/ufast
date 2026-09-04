@@ -1,14 +1,15 @@
-"""scipy 기반 C 다익스트라 경로비용 엔진.
+"""scipy-based C Dijkstra route-cost engine.
 
-PathFinder.cost_search 와 동일한 비용/거리를 compiled C
-(scipy.sparse.csgraph.dijkstra) 로 계산한다. 동률(같은 비용) 경로가
-여럿일 때 선택이 기존 구현과 다를 수 있다는 점 외에는 결과가 같다.
+Computes the same cost/distance as PathFinder.cost_search using compiled C
+(scipy.sparse.csgraph.dijkstra). The results are identical except that,
+when several paths tie on cost, the chosen path may differ from the
+original implementation.
 
-- 레일 토폴로지는 불변이므로 CSR 행렬 구조는 1회만 구축한다.
-- traffic_penalty 변경은 bridge → PathFinder.notify_penalty_changed 훅으로
-  전달받아, 해당 노드로 들어오는 엣지 가중치만 제자리 갱신한다.
-- custom_cost_function 이 설정된 실행에서는 PathFinder 가 이 엔진을
-  사용하지 않는다 (엣지별 파이썬 콜백은 C 경로로 표현 불가).
+- The rail topology is immutable, so the CSR matrix structure is built once.
+- traffic_penalty changes arrive via the bridge → PathFinder.notify_penalty_changed
+  hook; only the weights of edges entering the affected node are updated in place.
+- In runs where custom_cost_function is set, PathFinder does not use this
+  engine (a per-edge Python callback cannot be expressed in the C path).
 """
 from __future__ import annotations
 
@@ -29,8 +30,8 @@ class FastCostEngine:
         self.idx: Dict[str, int] = {n: i for i, n in enumerate(self.node_names)}
         n_nodes = len(self.node_names)
 
-        # ── 섹션 체인 → 방향 엣지 전개 (_cost_explore_direction 과 동일 의미) ──
-        # 정방향: node[j-1] → node[j]. two_way 섹션은 역방향 엣지도 추가.
+        # ── Expand section chains into directed edges (same semantics as _cost_explore_direction) ──
+        # Forward: node[j-1] → node[j]. two_way sections also add the reverse edge.
         edge_best: Dict[Tuple[int, int], Tuple[float, float]] = {}  # (u,v) → (move_time, dist)
         dup_count = 0
         for section in network.sections.values():
@@ -60,14 +61,14 @@ class FastCostEngine:
                     edge_best[key] = (move_time, distance)
                 else:
                     dup_count += 1
-                    # 병렬 엣지: penalty 는 도착노드 기준이라 두 엣지에 동일하게
-                    # 곱해지므로 move_time 이 작은 쪽이 항상 최소 비용이다.
+                    # Parallel edges: the penalty is keyed on the destination node, so it
+                    # multiplies both edges equally; the smaller move_time is always cheapest.
                     if move_time < old[0]:
                         edge_best[key] = (move_time, distance)
         if dup_count:
-            print(f"[FastRoute] 병렬 엣지 {dup_count}개 → 최소 move_time 으로 병합")
+            print(f"[FastRoute] merged {dup_count} parallel edges → keeping the minimum move_time")
 
-        # (src, dst) 정렬 순서로 배열 고정 → CSR data[i] == edge i
+        # Freeze arrays in sorted (src, dst) order → CSR data[i] == edge i
         keys = sorted(edge_best.keys())
         self._src = np.array([k[0] for k in keys], dtype=np.int32)
         self._dst = np.array([k[1] for k in keys], dtype=np.int32)
@@ -83,7 +84,7 @@ class FastCostEngine:
             shape=(n_nodes, n_nodes),
         )
 
-        # 도착노드별 유입 엣지 위치 (penalty 갱신용)
+        # Positions of incoming edges per destination node (for penalty updates)
         self._in_pos: Dict[int, np.ndarray] = {}
         by_dst: Dict[int, List[int]] = {}
         for pos, v in enumerate(self._dst):
@@ -92,10 +93,10 @@ class FastCostEngine:
             self._in_pos[v] = np.array(positions, dtype=np.int64)
 
         self._penalty_params = (pathfinder.penalty_weight, pathfinder.penalty_cap)
-        self._dirty_all = True          # 최초 1회 전체 가중치 계산
+        self._dirty_all = True          # compute all weights once on first use
         self._dirty_nodes: set = set()
 
-    # ── penalty 동기화 ────────────────────────────────────────────────
+    # ── penalty synchronization ───────────────────────────────────────
     def mark_dirty(self, node_names) -> None:
         for name in node_names:
             self._dirty_nodes.add(name)
@@ -143,13 +144,13 @@ class FastCostEngine:
                 data[positions] = self._move_time[positions] * eff
             self._dirty_nodes.clear()
 
-    # ── 쿼리 ──────────────────────────────────────────────────────────
+    # ── queries ───────────────────────────────────────────────────────
     def cost_search(
         self,
         from_node_name: str,
         to_node_names: List[str],
     ) -> Dict[str, Tuple[float, float, List[str]]]:
-        """PathFinder.cost_search 와 동일한 반환 형식의 1:N 최단비용."""
+        """1:N minimum cost with the same return format as PathFinder.cost_search."""
         i = self.idx.get(from_node_name)
         if i is None:
             return {}

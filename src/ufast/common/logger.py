@@ -1,6 +1,6 @@
 """
 SimulationLogger
-시뮬레이션 결과를 CSV + Summary 텍스트 형식으로 저장
+Save simulation results as CSV + summary text
 """
 
 import os
@@ -10,56 +10,56 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
-# ── Lot 레코드 ──────────────────────────────────────────────────────────────
+# ── Lot record ──────────────────────────────────────────────────────────────
 @dataclass
 class LotRecord:
     lot_id: str
     from_eq: str
     to_eq: str
-    created_time: float      # LOT 이벤트 발생 시각
-    pickup_time: float = -1  # OHT가 from_eq 도착하여 픽업한 시각
-    delivered_time: float = -1  # to_eq 배달 완료 시각
+    created_time: float      # time the LOT event occurred
+    pickup_time: float = -1  # time the OHT arrived at from_eq and picked up
+    delivered_time: float = -1  # time delivery to to_eq completed
 
     @property
     def waiting_time(self) -> float:
-        """픽업 대기시간 (created → pickup)"""
+        """Pickup wait time (created → pickup)"""
         if self.pickup_time < 0:
             return -1
         return self.pickup_time - self.created_time
 
     @property
     def transport_time(self) -> float:
-        """운반 시간 (pickup → delivered)"""
+        """Transport time (pickup → delivered)"""
         if self.pickup_time < 0 or self.delivered_time < 0:
             return -1
         return self.delivered_time - self.pickup_time
 
     @property
     def total_time(self) -> float:
-        """총 소요시간 (created → delivered)"""
+        """Total elapsed time (created → delivered)"""
         if self.delivered_time < 0:
             return -1
         return self.delivered_time - self.created_time
 
 
-# ── OHT 레코드 ──────────────────────────────────────────────────────────────
+# ── OHT record ──────────────────────────────────────────────────────────────
 @dataclass
 class OHTRecord:
     oht_id: str
     total_trips: int = 0
     total_distance: float = 0.0   # mm
-    idle_time: float = 0.0        # 초
-    assigned_time: float = 0.0    # 픽업 이동 시간 (초)
-    loaded_time: float = 0.0      # 배달 이동 시간 (초)
+    idle_time: float = 0.0        # seconds
+    assigned_time: float = 0.0    # travel time to pickup (seconds)
+    loaded_time: float = 0.0      # travel time for delivery (seconds)
 
-    # 내부 추적용
+    # internal tracking
     _last_status: str = field(default="IDLE", repr=False)
     _last_status_time: float = field(default=0.0, repr=False)
     _current_section_length: float = field(default=0.0, repr=False)
 
     @property
     def utilization(self) -> float:
-        """가동률 (LOADED 비율)"""
+        """Utilization (LOADED ratio)"""
         total = self.idle_time + self.assigned_time + self.loaded_time
         return self.loaded_time / total if total > 0 else 0.0
 
@@ -68,15 +68,15 @@ class OHTRecord:
         return self.total_distance / 1000.0
 
 
-# ── EQ 레코드 ───────────────────────────────────────────────────────────────
+# ── EQ record ───────────────────────────────────────────────────────────────
 @dataclass
 class EQRecord:
     eq_name: str
-    lots_dispatched: int = 0   # 이 EQ에서 출발한 lot 수
-    lots_received: int = 0     # 이 EQ로 도착한 lot 수
+    lots_dispatched: int = 0   # number of lots dispatched from this EQ
+    lots_received: int = 0     # number of lots that arrived at this EQ
 
 
-# ── EQ Rundown 레코드 ───────────────────────────────────────────────────────
+# ── EQ Rundown record ───────────────────────────────────────────────────────
 @dataclass
 class EQRundownRecord:
     seq: int
@@ -85,14 +85,14 @@ class EQRundownRecord:
     from_eq: str = ""
     to_eq: str = ""
     oht_id: str = ""
-    wait_start_time: float = -1.0     # 가공 대기 시작 시각(하늘색)
-    process_start_time: float = -1.0  # 가공 시작 시각(초록색)
+    wait_start_time: float = -1.0     # processing wait start time (light blue)
+    process_start_time: float = -1.0  # processing start time (green)
     rundown_time: float = -1.0        # wait_start → process_start
     status: str = "WAITING_FOR_LOT"
-    wait_origin: str = ""             # rundown 측정 시작 기준 (REQUEST/ARRIVAL 등)
+    wait_origin: str = ""             # rundown measurement start reference (REQUEST/ARRIVAL, etc.)
 
 
-# ── 메인 로거 ────────────────────────────────────────────────────────────────
+# ── Main logger ────────────────────────────────────────────────────────────────
 class SimulationLogger:
     def __init__(self):
         self.lot_records: Dict[str, LotRecord] = {}
@@ -117,22 +117,22 @@ class SimulationLogger:
         self.sim_duration = sim_duration
         self.num_oht = num_oht
 
-    # ── 실행 중 KPI 요약 ─────────────────────────────────────────────────
+    # ── Live KPI summary ─────────────────────────────────────────────────
     def get_live_kpis(self) -> Dict[str, float]:
-        """누적 레코드 기반 라이브 KPI — GUI Statistics 패널과
-        Replay 기록기(viz.replay_recorder)가 주기적으로 호출한다.
+        """Live KPIs from accumulated records — called periodically by the GUI
+        Statistics panel and the replay recorder (viz.replay_recorder).
 
-        - avg_transport_time: 픽업→배달 평균 (완료 lot)
-        - avg_delivery_time:  생성→배달 평균 (완료 lot)
-        - avg_call_wait:      생성→픽업 평균 (픽업된 lot)
-        - avg_rundown_time / rundown_count: EQ 가공대기 rundown
-        - wip: 생성됐지만 아직 배달되지 않은 lot 수
+        - avg_transport_time: mean pickup→delivery (completed lots)
+        - avg_delivery_time:  mean created→delivery (completed lots)
+        - avg_call_wait:      mean created→pickup (picked-up lots)
+        - avg_rundown_time / rundown_count: EQ processing-wait rundown
+        - wip: number of lots created but not yet delivered
         """
         tt: List[float] = []
         dt: List[float] = []
         cw: List[float] = []
         wip = 0
-        # GUI 스레드에서 호출될 수 있으므로 스냅샷 리스트로 순회
+        # May be called from the GUI thread, so iterate over snapshot lists
         for r in list(self.lot_records.values()):
             if r.delivered_time >= 0:
                 dt.append(r.total_time)
@@ -158,7 +158,7 @@ class SimulationLogger:
             "wip":                wip,
         }
 
-    # ── 이벤트 기록 메서드 ────────────────────────────────────────────────
+    # ── Event recording methods ────────────────────────────────────────────────
     def on_lot_created(self, lot_id: str, from_eq: str, to_eq: str, created_time: float):
         self.lot_records[lot_id] = LotRecord(
             lot_id=lot_id, from_eq=from_eq, to_eq=to_eq, created_time=created_time
@@ -181,9 +181,9 @@ class SimulationLogger:
     def on_eq_rundown_wait_start(self, eq_name: str, lot_id: str,
                                   wait_start_time: float, oht_id: str = "",
                                   wait_origin: str = ""):
-        """설비가 새 Lot 도착을 기다리기 시작한 시각을 기록한다.
+        """Record the time the equipment started waiting for a new lot to arrive.
 
-        wait_origin: rundown 측정 시작 기준 ("REQUEST"=호출 시점, ""=도착 시점 등).
+        wait_origin: rundown measurement start reference ("REQUEST"=call time, ""=arrival time, etc.).
         """
         if not eq_name or not lot_id:
             return
@@ -209,7 +209,7 @@ class SimulationLogger:
 
     def on_eq_process_start(self, eq_name: str, lot_id: str,
                             process_start_time: float, oht_id: str = ""):
-        """설비에 Lot이 도착해 가공이 시작된 시각과 rundown time을 기록한다."""
+        """Record the time a lot arrived at the equipment and processing started, plus the rundown time."""
         if not eq_name or not lot_id:
             return
 
@@ -269,7 +269,7 @@ class SimulationLogger:
         rec._last_status_time = current_time
 
     def on_oht_moved(self, oht_id: str, section_length: float):
-        """섹션 이동 시 거리 누적"""
+        """Accumulate distance on section moves"""
         rec = self.oht_records.get(oht_id)
         if rec:
             rec.total_distance += section_length
@@ -286,18 +286,18 @@ class SimulationLogger:
                 rec.loaded_time += elapsed
             rec._last_status_time = max(rec._last_status_time, float(end_time))
 
-    # ── 저장 ─────────────────────────────────────────────────────────────
+    # ── Save ─────────────────────────────────────────────────────────────
     def save(self, output_dir: str, kpi_mode: str = "both", simulator_mode: str = "production_logistics") -> List[str]:
-        """로그 저장. 저장된 파일 경로 목록 반환.
+        """Save logs. Returns the list of saved file paths.
 
         kpi_mode:
-          - logistics  : 반송/배차 중심 로그 저장
-          - production : 설비/rundown 중심 로그 저장
-          - both       : 기존 로그 전체 저장
+          - logistics  : save transport/assignment-centric logs
+          - production : save equipment/rundown-centric logs
+          - both       : save all existing logs
 
         simulator_mode:
-          - from_to_only          : processing/rundown 개념 없는 물류 전용 모드
-          - production_logistics  : 생산 상태 표시 및 rundown 로그 포함
+          - from_to_only          : logistics-only mode without processing/rundown concepts
+          - production_logistics  : includes production status display and rundown logs
         """
         os.makedirs(output_dir, exist_ok=True)
         self.finalize_oht_times(self.sim_duration)
@@ -343,10 +343,10 @@ class SimulationLogger:
             writer.writerow(["logistics", "completed_lots", len(completed), "lots", kpi_mode, simulator_mode, "delivered lots"])
             writer.writerow(["logistics", "avg_lot_waiting_time", f"{self._avg(waiting_times):.4f}", "s", kpi_mode, simulator_mode, "created to pickup"])
             writer.writerow(["logistics", "avg_transport_time", f"{self._avg(transport_times):.4f}", "s", kpi_mode, simulator_mode, "pickup to delivery"])
-            writer.writerow(["logistics", "transportation_time_TT", f"{self._avg(transport_times):.4f}", "s", kpi_mode, simulator_mode, "TT: pickup(배차/도착)->delivery(목적지 도착)"])
+            writer.writerow(["logistics", "transportation_time_TT", f"{self._avg(transport_times):.4f}", "s", kpi_mode, simulator_mode, "TT: pickup(assignment/arrival)->delivery(arrival at destination)"])
             writer.writerow(["logistics", "avg_total_tat", f"{self._avg(total_times):.4f}", "s", kpi_mode, simulator_mode, "created to delivery"])
-            writer.writerow(["logistics", "delivery_time_DT", f"{self._avg(total_times):.4f}", "s", kpi_mode, simulator_mode, "DT: 호출(created)->목적지 도착(delivery)"])
-            writer.writerow(["logistics", "avg_call_wait", f"{self._avg(waiting_times):.4f}", "s", kpi_mode, simulator_mode, "call wait: 호출->픽업"])
+            writer.writerow(["logistics", "delivery_time_DT", f"{self._avg(total_times):.4f}", "s", kpi_mode, simulator_mode, "DT: call(created)->arrival at destination(delivery)"])
+            writer.writerow(["logistics", "avg_call_wait", f"{self._avg(waiting_times):.4f}", "s", kpi_mode, simulator_mode, "call wait: call->pickup"])
             writer.writerow(["logistics", "avg_oht_utilization", f"{self._avg(oht_utils) * 100:.4f}", "%", kpi_mode, simulator_mode, "loaded_time / total_tracked_time"])
             writer.writerow(["production", "throughput", f"{throughput:.4f}", "lots/hr", kpi_mode, simulator_mode, "completed lots per simulated hour"])
             writer.writerow(["logistics", "completed_inbound_supply_delay_count", len(supply_delay_times), "events", kpi_mode, simulator_mode, "request to equipment arrival; not starvation"])
@@ -406,10 +406,10 @@ class SimulationLogger:
             f"min={mn(waiting_times):.1f}  max={mx(waiting_times):.1f}",
             f"  Transport time TT : avg={avg(transport_times):.1f}  "
             f"min={mn(transport_times):.1f}  max={mx(transport_times):.1f}  "
-            f"(픽업→목적지 도착)",
+            f"(pickup→arrival at destination)",
             f"  Delivery time  DT : avg={avg(total_times):.1f}  "
             f"min={mn(total_times):.1f}  max={mx(total_times):.1f}  "
-            f"(호출→목적지 도착)",
+            f"(call→arrival at destination)",
             f"  WIP (undelivered) : {sum(1 for r in self.lot_records.values() if r.delivered_time < 0)} lots",
             "",
             "── EQ Inbound Supply Delay ────────────────────────────",
@@ -519,7 +519,7 @@ class SimulationLogger:
         return path
 
 
-# 싱글턴
+# Singleton
 _instance: Optional[SimulationLogger] = None
 
 def get_logger() -> SimulationLogger:

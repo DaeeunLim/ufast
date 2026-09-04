@@ -1,4 +1,4 @@
-"""VehicleSpec — 제원 파일 로드, 플래그 덮어쓰기, 섹션 용량·엔진 반영."""
+"""VehicleSpec — specification file loading, flag overrides, section capacity and engine propagation."""
 import json
 import os
 import sys

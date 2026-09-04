@@ -1,15 +1,15 @@
 """
-viz/rerun_layout.py — Rerun 으로 SMAT2022 fab 정적 레이아웃 시각화.
+viz/rerun_layout.py — static SMAT2022 fab layout visualisation with Rerun.
 
-단독 실행:
+Standalone:
     python3 -m ufast.viz.rerun_layout
     python3 -m ufast.viz.rerun_layout --rail dataset/SMAT2022.rail
     python3 -m ufast.viz.rerun_layout --no-spawn --save layout.rrd
 
-라이브러리 (Phase 2 replay 에서 재사용):
+As a library (reused by the Phase 2 replay):
     from ufast.viz.rerun_layout import log_layout_entities, show_layout
-    show_layout('dataset/SMAT2022.rail')           # init + 로그 + (옵션) viewer
-    log_layout_entities('dataset/SMAT2022.rail')   # init 가정, 로그만
+    show_layout('dataset/SMAT2022.rail')           # init + log + (optional) viewer
+    log_layout_entities('dataset/SMAT2022.rail')   # assumes init; log only
 """
 from __future__ import annotations
 import argparse
@@ -30,7 +30,7 @@ from ufast.paths import DATASET_DIR
 from ufast.route import RouteManager
 
 
-# ── 색상 / 크기 (좌표 mm, fab ~ 300m × 153m) ────────────────
+# ── Colours / sizes (coordinates in mm, fab ~ 300 m x 153 m) ──
 _NODE_COLOR        = [128, 128, 128, 200]
 _FAMILY_COLOR      = [255, 200,  50, 255]
 _LINK_LINE_COLOR   = [ 80, 140, 220, 200]
@@ -44,7 +44,7 @@ _FAMILY_RADIUS_MM  = 1200.0
 def _ensure_rerun():
     if rr is None:
         raise RuntimeError(
-            "rerun-sdk 가 설치돼 있지 않습니다.\n"
+            "rerun-sdk is not installed.\n"
             "    pip3 install rerun-sdk"
         )
 
@@ -52,14 +52,14 @@ def _ensure_rerun():
 def load_layout_geometry(rail_file: str) -> Tuple[Dict[str, Tuple[float, float]],
                                                   list, list, list, list]:
     """
-    .rail 파일에서 시각화에 필요한 기하 정보를 추출한다.
+    Extract the geometry needed for visualisation from a .rail file.
 
     Returns:
         nodes_xy        — {node_name: (x, y)}
-        line_strips     — [[(x1,y1),(x2,y2)], ...] (직선 링크)
-        curve_strips    — [[(x1,y1),(x2,y2)], ...] (곡선 링크)
+        line_strips     — [[(x1,y1),(x2,y2)], ...] (straight links)
+        curve_strips    — [[(x1,y1),(x2,y2)], ...] (curved links)
         fam_positions   — [(x, y), ...]
-        fam_labels      — [tool_group, ...]  (fam_positions 와 동일 순서)
+        fam_labels      — [tool_group, ...]  (same order as fam_positions)
     """
     rm = RouteManager()
     rm.load_from_rail(rail_file)
@@ -91,16 +91,16 @@ def load_layout_geometry(rail_file: str) -> Tuple[Dict[str, Tuple[float, float]]
 
 def log_layout_entities(rail_file: str) -> Dict[str, Tuple[float, float]]:
     """
-    Layout entities 를 Rerun 에 로그한다. (rr.init 은 호출자가 이미 했다고 가정)
+    Log the layout entities to Rerun. (Assumes the caller has already called rr.init.)
 
     Returns:
-        nodes_xy 사전 — replay 단계에서 OHT 위치 보간에 재사용 가능.
+        nodes_xy dict — reusable for OHT position interpolation in the replay stage.
     """
     _ensure_rerun()
     nodes_xy, line_strips, curve_strips, fam_positions, fam_labels = \
         load_layout_geometry(rail_file)
 
-    # static=True: sim_time 타임라인 스크럽해도 항상 보이도록 함.
+    # static=True: keep visible while scrubbing the sim_time timeline.
     if line_strips:
         rr.log("layout/links/line",
                rr.LineStrips2D(line_strips, colors=_LINK_LINE_COLOR,
@@ -120,8 +120,8 @@ def log_layout_entities(rail_file: str) -> Dict[str, Tuple[float, float]]:
                        radii=_FAMILY_RADIUS_MM, labels=fam_labels),
            static=True)
 
-    print(f"[viz.rerun_layout] 레이아웃 로그 완료 — "
-          f"노드 {len(nodes_xy)} / 링크 {len(line_strips) + len(curve_strips)} "
+    print(f"[viz.rerun_layout] Layout logged — "
+          f"nodes {len(nodes_xy)} / links {len(line_strips) + len(curve_strips)} "
           f"(LINE {len(line_strips)} / CURVE {len(curve_strips)}) / "
           f"family {len(fam_positions)}")
     return nodes_xy
@@ -134,7 +134,7 @@ def show_layout(
     spawn: bool = True,
     save_rrd: Optional[str] = None,
 ) -> None:
-    """Rerun init + 레이아웃 로그 + (옵션) viewer / .rrd 저장."""
+    """Rerun init + layout log + (optional) viewer / .rrd save."""
     _ensure_rerun()
     if save_rrd:
         rr.init(app_id, spawn=False)
@@ -143,11 +143,11 @@ def show_layout(
     log_layout_entities(rail_file)
     if save_rrd:
         rr.save(save_rrd)
-        print(f"[viz.rerun_layout] .rrd 저장: {save_rrd}")
+        print(f"[viz.rerun_layout] .rrd saved: {save_rrd}")
 
 
 def _main():
-    p = argparse.ArgumentParser(description="Rerun 으로 SMAT2022 fab 정적 레이아웃")
+    p = argparse.ArgumentParser(description="Static SMAT2022 fab layout in Rerun")
     p.add_argument('--rail',
                    default=os.path.join(DATASET_DIR, 'SMAT2022.rail'))
     p.add_argument('--no-spawn', action='store_true')

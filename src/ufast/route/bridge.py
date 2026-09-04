@@ -1,7 +1,7 @@
 """
-bridge.py - 노드↔섹션 브릿지
+bridge.py - node ↔ section bridge
 
-노드 단위 RouteManager와 섹션 단위 시뮬레이터 사이의 연결 계층.
+The glue layer between the node-level RouteManager and the section-level simulator.
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ class SectionNodeBridge:
         self._transition_nodes_cache: Dict[Tuple[int, int], List[str]] = {}
         self._transition_zones_cache: Dict[Tuple[int, int], List[str]] = {}
 
-        # ── 섹션 간 경로 캐시 (TTL 기반) ──────────────────────────
+        # ── Section-to-section route cache (TTL based) ─────────────
         # {(from_sec, to_sec): (sim_time_cached, sec_path, cost, node_path)}
-        # 동일 구간 경로를 TTL 이내에 재요청하면 Dijkstra를 건너뛴다.
+        # If the same pair is requested again within the TTL, Dijkstra is skipped.
         self._section_route_cache: Dict[Tuple[int, int], Tuple[float, List[int], float, List[str]]] = {}
         self._section_route_cache_ttl: float = 5.0   # sim-seconds
 
@@ -38,9 +38,9 @@ class SectionNodeBridge:
         self._section_route_cache_ttl = float(ttl) if enabled else 0.0
 
     def clear_route_cost_cache(self):
-        """traffic penalty 변동 시 (from,to) 구간 경로 캐시만 무효화.
+        """Invalidate only the (from,to) section route cache when traffic penalties change.
 
-        transition 캐시는 토폴로지 고정이라 유지한다.
+        The transition caches are kept because the topology is fixed.
         """
         self._section_route_cache.clear()
 
@@ -54,7 +54,7 @@ class SectionNodeBridge:
         network = self.rm.network
         ds = data_set or self.ds
 
-        # 1차: 노드 목록 / node→section 구성
+        # Pass 1: build the node lists / node→section map
         for sec_name, net_section in network.sections.items():
             try:
                 sec_id = int(sec_name)
@@ -68,7 +68,7 @@ class SectionNodeBridge:
                 self.node_to_section[node_name] = sec_id
             self._section_oht_count.setdefault(sec_id, 0)
 
-        # 2차: entry/exit 결정 (1차 결과를 모두 본 뒤 판단해야 순서 의존성이 없다)
+        # Pass 2: decide entry/exit (must see all pass-1 results first to avoid order dependence)
         for sec_id, node_names in self.section_to_nodes.items():
             entry, exit_ = self._infer_section_endpoints(sec_id, node_names, ds)
             self.section_entry_node[sec_id] = entry
@@ -91,10 +91,10 @@ class SectionNodeBridge:
         first_next = self._endpoint_has_next_link(node_names[0], next_ids)
         last_next = self._endpoint_has_next_link(node_names[-1], next_ids)
 
-        # 마지막 노드에서 다음 섹션으로 이어지고 첫 노드는 그렇지 않으면 기본 방향 유지.
+        # If the last node links to the next section and the first does not, keep the default direction.
         if last_next and not first_next:
             return node_names[0], node_names[-1]
-        # 반대면 뒤집기.
+        # Otherwise, if reversed, flip it.
         if first_next and not last_next:
             return node_names[-1], node_names[0]
 
@@ -141,10 +141,10 @@ class SectionNodeBridge:
         best_from: Optional[str] = None
         best_to: Optional[str] = None
 
-        # perf(#1): from_node 당 1:N Dijkstra(cost_search) 한 번으로 모든
-        # to_candidates 비용을 구한다 — 기존 |from|×|to| 개별 탐색을 |from| 으로.
-        # cost_search 는 path_search 와 동일 경로를 주며(검증됨) 비용은 누적순서
-        # 차이로 ~1e-11 상대오차만 — min 선택을 뒤집지 않음.
+        # perf(#1): one 1:N Dijkstra (cost_search) per from_node yields the costs of all
+        # to_candidates — reduces the former |from|×|to| individual searches to |from|.
+        # cost_search returns the same path as path_search (verified); the cost differs
+        # only by ~1e-11 relative error from summation order — never flips the min choice.
         for from_node in from_candidates:
             results = self.rm.pathfinder.cost_search(from_node, to_candidates, context=context)
             for to_node in to_candidates:
@@ -171,7 +171,7 @@ class SectionNodeBridge:
         if from_sec_id == to_sec_id:
             return [], 0.0, []
 
-        # ── 섹션 경로 캐시 조회 ──────────────────────────────
+        # ── Section route cache lookup ───────────────────────
         _ck = (from_sec_id, to_sec_id)
         _cached = self._section_route_cache.get(_ck)
         if _cached is not None:
@@ -196,7 +196,7 @@ class SectionNodeBridge:
         if to_sec_id not in seen:
             result.append(to_sec_id)
 
-        # ── 캐시 저장 ─────────────────────────────────────────
+        # ── Store in cache ────────────────────────────────────
         self._section_route_cache[_ck] = (self.rm.sim_time, result, cost, node_path)
 
         return result, cost, node_path
@@ -207,9 +207,10 @@ class SectionNodeBridge:
         to_sec_id: int,
     ) -> Tuple[List[int], float, List[str]]:
         """
-        penalty를 무시한 정적(캐시) 경로로 비용을 추정한다.
-        배차 후보 비교 등 '실제 경로 지정이 아닌 상대 비교' 목적에만 사용.
-        `path_search_static`는 내부에 영구 캐시를 유지하므로 반복 호출 비용이 거의 0이다.
+        Estimate the cost using the static (cached) route that ignores penalties.
+        Use only for relative comparisons such as ranking assignment candidates,
+        not for actual route selection.
+        `path_search_static` keeps a permanent internal cache, so repeated calls are nearly free.
         """
         if from_sec_id == to_sec_id:
             return [], 0.0, []
@@ -334,21 +335,21 @@ class SectionNodeBridge:
 
     def can_enter_transition(self, vehicle_name: str, from_sec_id: int, to_sec_id: int, tracker) -> bool:
         """
-        섹션 기반 시뮬레이터에서는 merge / crossing conflict zone만 진입 제어 대상으로 본다.
+        In the section-based simulator only merge / crossing conflict zones are subject to entry control.
 
-        이전 구현은 transition 상의 모든 node를 reservation 대상으로 잡았는데,
-        각 OHT의 current_node를 섹션 entry node에 고정 점유시키는 구조와 충돌하여
-        다음 섹션에 OHT가 1대라도 있으면(버퍼 빈칸이 남아 있어도)
-        node reservation 단계에서 진입이 계속 막히는 freeze가 발생했다.
+        The previous implementation reserved every node on the transition, which conflicted
+        with the design that pins each OHT's current_node to the section entry node: as soon
+        as the next section held even one OHT (even with buffer slots still free), entry kept
+        being refused at the node reservation stage, causing a freeze.
 
-        따라서 여기서는 node path 전체가 아니라 conflict zone만 검사한다.
-        같은 섹션 내 다중 적재 가능 여부는 section buffer가 별도로 관리한다.
+        Therefore only the conflict zones are checked here, not the whole node path.
+        Whether several vehicles may share one section is managed separately by the section buffer.
         """
         zones = self.get_conflict_zones(from_sec_id, to_sec_id)
         return tracker.can_reserve_conflict_zones(vehicle_name, zones)
 
     def reserve_transition(self, vehicle_name: str, from_sec_id: int, to_sec_id: int, tracker, until_time: float) -> bool:
-        """섹션 이동 직전에는 conflict zone만 예약한다."""
+        """Reserve only the conflict zones right before a section transition."""
         zones = self.get_conflict_zones(from_sec_id, to_sec_id)
         return tracker.reserve_conflict_zones(vehicle_name, zones, until_time)
 

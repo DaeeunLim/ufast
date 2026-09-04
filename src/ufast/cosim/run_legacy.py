@@ -1,20 +1,20 @@
 """
-ufast/cosim/run_legacy.py — Fromto-driven 시뮬레이션 헤드리스 wrapper.
+ufast/cosim/run_legacy.py — headless wrapper for fromto-driven simulation.
 
-생산 데이터(SMT2020 route/order/tool)가 없고 fromto.dat 만 있는 입력 시나리오에
-사용. 기존 U-FAST 의 legacy 컴포넌트를 그대로 활용하되 PyQt timer 의존성만
-제거해 순수 next-event 루프로 돌린다.
+Used for input scenarios that have no production data (SMT2020 route/order/tool)
+and only a fromto.dat. Reuses the legacy U-FAST components as they are, removing
+only the PyQt timer dependency, and runs them in a pure next-event loop.
 
-활용 컴포넌트 (모두 기존 U-FAST — 재구현 없음):
-  - common/rail_io.py        legacy .rail 파일 reader (정수 노드 ID)
+Components used (all existing U-FAST — nothing reimplemented):
+  - common/rail_io.py        legacy .rail file reader (integer node IDs)
   - common/fromto_parser.py  fromto.dat → [(from_eq, to_eq, interval_s), ...]
-  - core/data_set.py           SimulatorDataSet 싱글톤
+  - core/data_set.py           SimulatorDataSet singleton
   - route/                     RouteManager + SectionNodeBridge + Dispatcher
   - control/controllers.py     VehicleController + EventHandler
 
-기존 main_ui.py 의 start_simulation + _run_step 흐름을 헤드리스로 재구성.
-production 모드(ufast/cosim/run.py) 와 동일하게 trajectory / KPI / Rerun 재생 가능 —
-단 본 v1 은 KPI 출력까지. trajectory 기록은 후속.
+Reconstructs the start_simulation + _run_step flow of the former main_ui.py headlessly.
+Trajectory / KPI / Rerun replay are possible just like production mode
+(ufast/cosim/run.py) — this v1 goes as far as KPI output; trajectory recording follows.
 """
 from __future__ import annotations
 import heapq
@@ -38,11 +38,11 @@ from ufast.paths import DATASET_DIR
 from ufast.cosim.results import new_result_run_id, DEFAULT_RESULTS_DIR
 
 
-# 주기적 idle repositioning 간격 (sim 초)
+# periodic idle repositioning interval (sim seconds)
 _REPO_INTERVAL_S = 0.5
 
 
-# legacy 모드 전략 이름 → 인스턴스 팩토리
+# legacy-mode strategy name → instance factory
 _LEGACY_STRATEGIES = {
     'same_section': SameSectionFirstStrategy,
     'nearest':      NearestIdleStrategy,
@@ -72,26 +72,26 @@ def run_legacy_fromto(
     strict: bool = False,
 ) -> dict:
     """
-    Fromto-driven 시뮬레이션을 헤드리스로 실행한다.
+    Run a fromto-driven simulation headlessly.
 
     Args:
-        rail_file: legacy .rail 파일 (정수 노드 ID + RAILLIST 필요)
-        fromto_file: fromto.dat (탭 구분, from_eq/to_eq/interval_seconds)
-        num_oht: OHT 대수
-        sim_duration_s: 시뮬레이션 종료 시각 (sim 초)
-        seed: 랜덤 시드
-        enable_idle_repo: IDLE OHT 재배치 주기 호출 여부
-        verbose: 진행 출력
-        strict: fromto 설비가 레일 EQ 에 없으면 실행 중단
+        rail_file: legacy .rail file (integer node IDs + RAILLIST required)
+        fromto_file: fromto.dat (tab-separated, from_eq/to_eq/interval_seconds)
+        num_oht: number of OHTs
+        sim_duration_s: simulation end time (sim seconds)
+        seed: random seed
+        enable_idle_repo: whether to call IDLE OHT repositioning periodically
+        verbose: print progress
+        strict: abort the run if fromto equipment is missing from the rail EQ list
 
     Returns:
-        결과 요약 dict
+        result summary dict
     """
     run_id = new_result_run_id()
     import random
     random.seed(seed)
 
-    # ── SimulatorDataSet 싱글톤 초기화 (이전 ufast 실행 잔재 제거) ──
+    # ── Reset the SimulatorDataSet singleton (clear leftovers from a previous ufast run) ──
     ds = SimulatorDataSet.get_instance()
     ds.clear()
     ds.main_clock = 0.0
@@ -101,54 +101,54 @@ def run_legacy_fromto(
         print(f"[run_legacy] fromto={fromto_file}")
         print(f"[run_legacy] duration={sim_duration_s:.0f}s | OHT={num_oht} | seed={seed}")
 
-    # ── 레이아웃 + 라우팅 (legacy 경로) ──
-    load_rail_file(rail_file)         # ds.sections / ds.eq_list 채움
+    # ── Layout + routing (legacy path) ──
+    load_rail_file(rail_file)         # fills ds.sections / ds.eq_list
     rm = RouteManager()
     rm.load_from_rail(rail_file)
     rm.initialize()
     bridge = SectionNodeBridge(rm, ds)
     bridge.build_mapping()
     if verbose:
-        print(f"[run_legacy] 레이아웃: sections {len(ds.sections):,} / "
+        print(f"[run_legacy] layout: sections {len(ds.sections):,} / "
               f"EQs {len(ds.eq_list):,} / nodes {rm.network.node_count:,}")
 
-    # ── Fromto 수요 데이터 + 정합성 검사 ──
-    # 레일에 없는 설비를 참조하는 레코드는 init_lot_events 가 조용히 걸러내므로
-    # 사전에 요약을 출력한다 (strict 면 중단).
+    # ── Fromto demand data + consistency check ──
+    # Records referencing equipment absent from the rail are silently filtered out by
+    # init_lot_events, so print a summary up front (abort if strict).
     fromto_data = load_fromto(fromto_file)
     from ufast.common.consistency import check_fromto
     report = check_fromto(fromto_data, ds.eq_list)
     if verbose or not report.ok:
         print(f"[run_legacy] {report.summary()}")
     if not report.ok and not strict:
-        print("[run_legacy] ⚠️  미매칭 레코드는 이벤트 생성에서 제외됩니다. "
-              "--strict 로 중단 가능.")
+        print("[run_legacy] ⚠️  unmatched records are excluded from event generation. "
+              "Use --strict to abort instead.")
     if strict:
         report.raise_if_invalid()
 
-    # ── Vehicle / Dispatcher / Event Handler (legacy 그대로) ──
+    # ── Vehicle / Dispatcher / Event Handler (legacy as is) ──
     vc = VehicleController(num_oht, rm, bridge)
     vc.init()
     vc.dispatcher = Dispatcher(rm, bridge, _make_strategy(strategy))
     if verbose:
-        print(f"[run_legacy] dispatch 전략: {strategy} "
+        print(f"[run_legacy] dispatch strategy: {strategy} "
               f"({type(vc.dispatcher.strategy).__name__})")
 
     eh = EventHandler(vc)
     eh.init_lot_events(fromto_data, sim_duration_s)
     if verbose:
-        print(f"[run_legacy] LOT 이벤트 등록: {ds.lot_count:,}")
+        print(f"[run_legacy] LOT events scheduled: {ds.lot_count:,}")
 
-    # ── trajectory 기록 (viz 시) ──
+    # ── Trajectory recording (when viz) ──
     recorder = None
     if viz:
         from ufast.cosim.legacy_trajectory import LegacyTrajectoryRecorder
         recorder = LegacyTrajectoryRecorder(vc, bridge)
         recorder.snapshot_initial()
         if verbose:
-            print(f"[run_legacy] trajectory 기록 활성 (viz)")
+            print(f"[run_legacy] trajectory recording enabled (viz)")
 
-    # ── 헤드리스 next-event 루프 (Qt timer 대체) ──
+    # ── Headless next-event loop (replaces the Qt timer) ──
     t0 = time.time()
     last_repo = 0.0
     processed = 0
@@ -163,25 +163,25 @@ def run_legacy_fromto(
         eh.process_event(evt)
         processed += 1
 
-        # OHT 상태 관찰
+        # observe OHT states
         if recorder is not None:
             recorder.observe(ds.main_clock)
 
-        # 주기적 IDLE 재배치
+        # periodic IDLE repositioning
         if enable_idle_repo and ds.main_clock - last_repo >= _REPO_INTERVAL_S:
             eh.reposition_idle_ohts(ds.main_clock)
             last_repo = ds.main_clock
-            # repo 도 OHT 위치 변경 — 관찰
+            # repositioning also changes OHT positions — observe
             if recorder is not None:
                 recorder.observe(ds.main_clock)
 
     elapsed = time.time() - t0
 
     if verbose:
-        print(f"\n[run_legacy] 시뮬레이션 완료 — wall {elapsed:.1f}s, "
+        print(f"\n[run_legacy] simulation finished — wall {elapsed:.1f}s, "
               f"sim {ds.main_clock:.1f}s, events {processed:,}")
 
-    # ── meta + 결과 저장 + 분석 출력 (production 과 동일 흐름) ──
+    # ── meta + save results + print analysis (same flow as production) ──
     from ufast.cosim.results import (collect_fromto_results, save_results,
                                auto_result_path, save_csv_exports)
     from ufast.cosim.analyze import analyze_one
@@ -202,7 +202,7 @@ def run_legacy_fromto(
         'events_processed': processed,
     }
 
-    # ── trajectory 저장 (viz 시) ──
+    # ── Save trajectory (when viz) ──
     trajectory_data = None
     traj_path = None
     if viz and recorder is not None:
@@ -214,23 +214,23 @@ def run_legacy_fromto(
         with open(traj_path, 'w', encoding='utf-8') as f:
             json.dump(trajectory_data, f, ensure_ascii=False)
         if verbose:
-            print(f"\n[run_legacy] 궤적 저장: {traj_path} "
+            print(f"\n[run_legacy] trajectories saved: {traj_path} "
                   f"(trip {len(recorder.trips):,})")
 
-    # ── 통합 results / analyze ──
+    # ── Unified results / analyze ──
     results = collect_fromto_results(meta, vc, ds, trajectory_data)
     out_path = save_results(results, auto_result_path(DEFAULT_RESULTS_DIR, meta))
-    # F16 — fromto 모드는 trip CSV 만 가능 (kpi/lots/machines 는 production 전용)
+    # F16 — fromto mode can only export the trip CSV (kpi/lots/machines are production-only)
     if recorder is not None and recorder.trips:
         csv_paths = save_csv_exports(out_path, trip_log=recorder.trips)
         if verbose and csv_paths:
             print(f"[run_legacy] CSV export: {len(csv_paths)} file — "
                   f"{', '.join(os.path.basename(p) for p in csv_paths)}")
     if verbose:
-        print(f"[run_legacy] 결과 저장: {out_path}")
+        print(f"[run_legacy] results saved: {out_path}")
         analyze_one(out_path)
 
-    # 호환용 raw 결과 (CosimWorker 등에서 참조)
+    # raw result for compatibility (referenced by CosimWorker etc.)
     raw_result = {
         **meta,
         'lot_count': ds.lot_count,
@@ -246,15 +246,15 @@ def run_legacy_fromto(
         raw_result['trajectory_path'] = traj_path
         raw_result['recorded_trips'] = len(recorder.trips)
 
-    # ── Rerun 재생 (viz 시) ──
+    # ── Rerun replay (when viz) ──
     if viz and traj_path:
         try:
             from ufast.viz.rerun_replay import show_run
             if verbose:
-                print("[run_legacy] Rerun 시각화 시작 (Fromto 모드)...")
+                print("[run_legacy] starting Rerun visualisation (Fromto mode)...")
             show_run(rail_file, traj_path)
         except Exception as e:
-            print(f"[run_legacy] ⚠️  시각화 실패: {e}")
+            print(f"[run_legacy] ⚠️  visualisation failed: {e}")
 
     return raw_result
 
@@ -270,7 +270,7 @@ def _trajectory_out_path(rail_file, fromto_file, num_oht, duration, seed, strate
 
 
 def _build_arg_parser():
-    """CLI 인자 정의 — production 모드(run.py)와 동일하게 argparse 로 제공."""
+    """CLI argument definition — provided with argparse, same as production mode (run.py)."""
     import argparse
     p = argparse.ArgumentParser(
         prog='ufast-fromto',

@@ -1,226 +1,287 @@
 # U-FAST (Unified Fab-AMHS Simulation Toolkit) CLI Execution Guide
 
-이 문서는 U-FAST 반도체 co-simulation 시뮬레이터의 CLI(Command Line Interface) 모드 실행 방법과 주요 옵션들에 대한 상세한 가이드입니다. 
+This document is a detailed guide to running the U-FAST semiconductor co-simulation simulator in
+CLI (Command Line Interface) mode and to its main options.
 
-U-FAST는 생산 시뮬레이터(PySCFabSim)와 물리적 물류 시뮬레이터(AMHS)를 연동하는 co-simulation 엔진으로, 다음 세 가지 주요 CLI 스크립트를 제공합니다.
+U-FAST is a co-simulation engine that couples a production simulator (PySCFabSim) with a physical
+logistics simulator (AMHS). It provides the following three main CLI scripts.
 
-1. **통합 Co-Simulation 실행기 (`python -m ufast.cosim.run` / `ufast-run`):** 단일 생산 데이터셋과 레일 레이아웃을 기반으로 생산과 물류(AMHS)를 연동하여 실시간 시뮬레이션을 실행하고 분석 데이터를 출력합니다.
-2. **Fromto(logistics-only) 모드 실행기 (`python -m ufast.cosim.run_fromto` / `ufast-fromto`):** 생산 데이터 없이 레일 레이아웃 + fromto.dat(반송 수요표)만으로 co-simulation 과 **같은 AMHS 층**(blocking 모델·운동학·전략·KPI)을 실행합니다.
-3. **베이스라인 비교 및 캐싱 스크립트 (`scripts/compare_baselines.py`):** PySCFabSim, LogiFabSim, U-FAST 세 시뮬레이터의 생산 KPI(Cycle Time, Throughput, 적기 인도율 등)를 비교하고, 자동으로 캐싱하여 대규모 시뮬레이션의 효율을 극대화합니다.
+1. **Integrated co-simulation runner (`python -m ufast.cosim.run` / `ufast-run`):** runs a coupled
+   production + logistics (AMHS) simulation on a single production dataset and rail layout and
+   writes the analysis output.
+2. **Fromto (logistics-only) runner (`python -m ufast.cosim.run_fromto` / `ufast-fromto`):** runs
+   the **same AMHS layer** as the co-simulation (blocking model, kinematics, strategies, KPIs) from a
+   rail layout + fromto.dat (transport demand table) only, without production data.
+3. **Baseline comparison and caching script (`scripts/compare_baselines.py`):** compares the
+   production KPIs (cycle time, throughput, on-time delivery rate, etc.) of the three simulators
+   PySCFabSim, LogiFabSim and U-FAST, and caches results automatically to make large-scale
+   simulation campaigns efficient.
 
 ---
 
-## 1. Co-Simulation 실행기 (`python -m ufast.cosim.run`)
+## 1. Co-simulation runner (`python -m ufast.cosim.run`)
 
-생산공정과 물리적 AMHS 물류를 통합하여 실제 가동 궤적 및 제어 전략을 시뮬레이션하는 메인 스크립트입니다.
+The main script: it integrates the production process with physical AMHS logistics and simulates
+the actual vehicle trajectories and control strategies.
 
-### 실행 명령어 구조
+### Command structure
 ```bash
 PYTHONPATH=src python -m ufast.cosim.run [dataset_dir] [rail_file] [options]
 ```
 
-### 위치 인수 (Positional Arguments)
-* **`dataset_dir`**: 생산공정 데이터셋 폴더 경로 (기본값: `dataset/HVLM`)
-  * 예시: `dataset/HVLM`, `dataset/LVHM`, `dataset/LVLM`
-* **`rail_file`**: 물류 레일 레이아웃 파일 경로 (기본값: `dataset/SMAT2022.rail`)
-  * 예시: `dataset/SMAT2022.rail`, `case1_SMT2020_106_nospur.rail`
+### Positional Arguments
+* **`dataset_dir`**: path to the production dataset folder (default: `dataset/HVLM`)
+  * Examples: `dataset/HVLM`, `dataset/LVHM`, `dataset/LVLM`
+* **`rail_file`**: path to the logistics rail layout file (default: `dataset/SMAT2022.rail`)
+  * Examples: `dataset/SMAT2022.rail`, `case1_SMT2020_106_nospur.rail`
 
-### 상세 CLI 옵션 (Options)
+### Detailed CLI Options
 
-| 옵션명 | 타입 | 선택지 및 포맷 | 기본값 | 설명 및 영향 |
+| Option | Type | Choices / format | Default | Description and effect |
 | :--- | :--- | :--- | :--- | :--- |
-| `--days` | `int` | 양의 정수 | `1` | **시뮬레이션 수행 기간** (일 단위). 기간이 길어질수록 WIP(재공) 상태가 안정화되나 연산 시간이 증가합니다. |
-| `--oht` | `int` | 양의 정수 | `200` | **AMHS 내 OHT 차량 대수** (Fleet Size). 차량 대수가 너무 적으면 물류 병목이 발생하고, 너무 많으면 레일 혼잡도가 급증합니다. |
-| `--seed` | `int` | 정수 | `0` | **난수 시드값**. 난수 재현성을 확보하여 동일 조건 하에서 항상 같은 시뮬레이션 결과를 출력합니다. |
-| `--alpha` | `float` | `0.0` ~ `1.0` | `0.05` | **혼잡도 가중치 ($\alpha$)**. 혼잡 기반 최단경로 탐색 시, 전방 차량 1대당 경로 가중치에 추가할 페널티 계수입니다. |
-| `--dispatcher` | `str` | `fifo`<br>`cr`<br>`random` | `fifo` | **생산 Dispatching Rule**. 설비 대기열에서 다음 가공할 Lot을 결정하는 의사결정 규칙입니다.<br>• `fifo`: 선입선출<br>• `cr`: Critical Ratio (긴급도 우선)<br>• `edd`: Earliest Due Date (납기일 기준)<br>• `setup_avoidance`: 셋업 전환 최소화 규칙 |
-| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `fifo` | **AMHS OHT 배차(Assignment) 전략**. 유휴 OHT를 로딩 요청이 발생한 로트에게 어떻게 매칭할지 결정합니다.<br>• `fifo`: 요청이 들어온 순서대로 매칭<br>• `nearest`: 최단 거리에 있는 차량 우선 매칭 |
-| `--congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | **물류 혼잡 모델 선택**.<br>• `queue` (**기본값**): **용량 제약 blocking 모델** — 각 섹션이 유한 FIFO 슬롯(⌊구간 길이/차량 footprint⌋)을 갖고, 가득 찬 섹션은 진입이 차단되어 대기합니다. 데드락은 wait-for 사이클 탐지 후 강제 진입으로 해소되며 `blocked_events`/`blocked_time_s`/`deadlock_forced` 지표가 결과에 추가됩니다 (α 미사용).<br>• `section_local`: delay 기반 대안 — 동일 구간 내 다수 OHT 주행 시 이동 시간이 점유 비례로 팽창합니다 (α 사용).<br>• `global_tip`: LogiFabSim 방식의 전역 TIP 비례 감속 (비교용 재현).<br>• `off`: 혼잡 미반영 (free-flow). |
-| `--idle` | `str` | `off`<br>`on` | `off` | **유휴 차량(Idle OHT) 재배치 전략**.<br>• `off`: 유휴 차량이 목적지에서 대기<br>• `reposition`: 유휴 차량을 수요가 높을 것으로 예상되는 영역으로 사전에 이동시킵니다. |
-| `--routing` | `str` | `off`<br>`dynamic` | `off` | **OHT 경로 탐색 모드**.<br>• `off` / `static`: 정적 최단 거리(Free-flow) 경로 기준 주행<br>• `dynamic`: 실시간 레일 혼잡(α 페널티 포함)을 반영한 동적 다익스트라 경로 재탐색 |
-| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | **다음 가공 설비(Machine) 후보 매칭 모드**.<br>• `exact` (기본): 상위 후보 설비 8개에 대해 정밀한 물리적 다익스트라 물류 경로를 연산해 최단 시간 내 도달할 수 있는 설비를 선택합니다.<br>• `nearest` (추천): 물리적 경로 탐색 대신 유클리드 최단 거리(직선 거리)를 활용해 설비를 근사 선택합니다. **(연산 성능을 약 5배 이상 단축시킵니다.)** |
-| `--static-warmup-days` | `float` | 양의 실수 | `0.0` | **정적 웜업 일수** (일 단위). 시뮬레이션 초기 적체 및 웜업 기간 동안 물리적 AMHS 모델을 생략하고 정적 반송 시간 상수를 적용하여, 고부하 구간인 웜업 단계를 순식간에 지나가도록 합니다. |
-| `--amhs-settling-days` | `float` | 양의 실수 | `0.0` | **AMHS 적응/안정화 일수** (일 단위). 정적 웜업이 완료된 후, 통계 집계를 시작하기 전에 실제 AMHS(OHT 주행)를 가동하여 물류 흐름이 안착되도록 하는 유예 기간입니다. |
-| `--custom-assignment` / `--custom-routing` / `--custom-idle` | `path` | `.py` / `.pkl` | 없음 | **커스텀 전략 플러그인** — OHT 배차 / 라우팅 / 유휴 재배치 슬롯을 사용자 파일로 교체. `None` 반환 시 내장 규칙으로 폴백. 파일 이름만 주면 `strategies/` 폴더에서 찾음. 규약·예제: [strategies/README.md](../strategies/README.md), `examples/` |
-| `--custom-routing-cost` | `path` | `.py` / `.pkl` | 없음 | **경로 탐색 엣지 비용 함수** 플러그인 (`compute_cost(...)`). 설정 시 C 가속 경로탐색이 꺼지고 순정 파이썬 경로로 폴백. 적용된 플러그인 파일명은 네 종 모두 결과 JSON `meta.custom_strategies` 에 기록 |
-| `--viz` | `flag` | `--viz` 추가 시 활성화 | `False` | **Rerun 시각화 데이터 생성 플래그**. 활성화 시 Rerun 뷰어에서 재생 가능한 시뮬레이션 주행 및 머신 상태 궤적 데이터(`_trajectories.json`)를 생성하고, 시뮬레이션 종료 시 자동으로 Rerun 브라우저를 연동하여 시각화합니다. |
-| `--strict` | `flag` | `--strict` 추가 시 활성화 | `False` | **입력 정합성 엄격 모드**. 데이터셋의 tool family(STNFAM)가 레일 목적지(eq_to_node 또는 Equipment.csv)로 해석되지 않으면 실행을 중단합니다. 기본 동작은 경고 출력 후 해당 family의 이송을 스킵(`skipped_transport` 집계)합니다. Delay 가상 스테이션(STNFAMLOC=Delay)은 검사에서 제외됩니다. |
-| `--vehicle-spec` | `path` | `.json` 또는 SMAT2022 `VehicleType.csv` | `dataset/vehicle_spec.json` | **OHT 차량 제원 파일**. 속도·가감속·차량 길이·최소 차간·직선/곡선 제한속도. 기본 파일 값 = SMAT2022 OHTV0. 아래 플래그가 파일 값을 덮어씁니다. |
-| `--oht-speed` / `--oht-accel` / `--oht-decel` | `float` | m/s, m/s², m/s² | 파일 값 (5 / 2 / 3.5) | 최고속도·가속도·감속도 (사다리꼴 운동학 자유주행 시간에 반영) |
-| `--oht-length` / `--oht-headway` | `float` | mm | 파일 값 (784 / 125) | 차량 길이·최소 차간. 합(footprint, 기본 909 mm)으로 `queue` 모델의 섹션 용량 = max(1, ⌊섹션 길이 / footprint⌋) 결정 |
-| `--line-speed` / `--curve-speed` | `float` | m/s | 파일 값 (5 / 1) | 직선/곡선 링크 제한속도 |
+| `--days` | `int` | positive integer | `1` | **Simulation horizon** (days). Longer horizons let the WIP state settle but increase computation time. |
+| `--oht` | `int` | positive integer | `200` | **Number of OHT vehicles in the AMHS** (fleet size). Too few vehicles create a logistics bottleneck; too many sharply increase rail congestion. |
+| `--seed` | `int` | integer | `0` | **Random seed**. Ensures reproducibility so that the same conditions always produce the same simulation result. |
+| `--alpha` | `float` | `0.0` ~ `1.0` | `0.05` | **Congestion weight ($\alpha$)**. Penalty coefficient added to the edge weight per vehicle ahead during congestion-aware shortest-path search. |
+| `--dispatcher` | `str` | `fifo`<br>`cr`<br>`random` | `fifo` | **Production dispatching rule**. Decision rule that picks the next lot to process from a tool queue.<br>• `fifo`: first-in first-out<br>• `cr`: Critical Ratio (urgency first)<br>• `edd`: Earliest Due Date<br>• `setup_avoidance`: minimises setup changes |
+| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `fifo` | **AMHS OHT assignment strategy**. Decides how idle OHTs are matched to lots that issued a loading request.<br>• `fifo`: match in request order<br>• `nearest`: prefer the closest vehicle |
+| `--congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | **Logistics congestion model**.<br>• `queue` (**default**): **capacity-constrained blocking model** — each section has a finite number of FIFO slots (⌊section length / vehicle footprint⌋); entry into a full section is blocked and the vehicle waits. Deadlocks are resolved by wait-for cycle detection followed by forced entry, and the `blocked_events`/`blocked_time_s`/`deadlock_forced` metrics are added to the result (α unused).<br>• `section_local`: delay-based alternative — when several OHTs travel in the same section the travel time is inflated in proportion to occupancy (uses α).<br>• `global_tip`: LogiFabSim-style global TIP-proportional slowdown (reproduced for comparison).<br>• `off`: no congestion (free-flow). |
+| `--idle` | `str` | `off`<br>`on` | `off` | **Idle OHT repositioning strategy**.<br>• `off`: idle vehicles wait at their destination<br>• `reposition`: idle vehicles are moved in advance to areas where demand is expected to be high. |
+| `--routing` | `str` | `off`<br>`dynamic` | `off` | **OHT route search mode**.<br>• `off` / `static`: drive along the static shortest (free-flow) route<br>• `dynamic`: dynamic Dijkstra re-routing that reflects real-time rail congestion (including the α penalty) |
+| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | **Candidate matching mode for the next processing tool**.<br>• `exact` (default): computes a precise physical Dijkstra logistics route for the top 8 candidate tools and selects the one reachable in the shortest time.<br>• `nearest` (recommended): approximates the selection with the Euclidean (straight-line) distance instead of a physical route search. **(Cuts computation time by roughly 5x or more.)** |
+| `--static-warmup-days` | `float` | positive real | `0.0` | **Static warm-up days**. During the initial backlog and warm-up period the physical AMHS model is skipped and a static transport-time constant is applied, so the heavily loaded warm-up phase passes almost instantly. |
+| `--amhs-settling-days` | `float` | positive real | `0.0` | **AMHS adaptation/settling days**. Grace period after the static warm-up and before statistics collection starts, during which the real AMHS (OHT driving) runs so that the logistics flow settles. |
+| `--custom-assignment` / `--custom-routing` / `--custom-idle` | `path` | `.py` / `.pkl` | none | **Custom strategy plugins** — replace the OHT assignment / routing / idle repositioning slot with a user file. Returning `None` falls back to the built-in rule. A bare file name is looked up in the `strategies/` folder. Conventions and examples: [strategies/README.md](../strategies/README.md), `examples/` |
+| `--custom-routing-cost` | `path` | `.py` / `.pkl` | none | **Route-search edge cost function** plugin (`compute_cost(...)`). When set, the C-accelerated path search is disabled and the pure-Python path is used. The file names of all four applied plugins are recorded in the result JSON under `meta.custom_strategies` |
+| `--viz` | `flag` | enabled when `--viz` is given | `False` | **Rerun visualisation data flag**. When enabled, generates the simulation driving and machine-state trajectory data (`_trajectories.json`) that can be replayed in the Rerun viewer, and automatically opens the Rerun browser for visualisation when the simulation ends. |
+| `--strict` | `flag` | enabled when `--strict` is given | `False` | **Strict input consistency mode**. Aborts the run if a tool family (STNFAM) in the dataset cannot be resolved to a rail destination (eq_to_node or Equipment.csv). The default behaviour prints a warning and skips transports of that family (counted in `skipped_transport`). Delay virtual stations (STNFAMLOC=Delay) are excluded from the check. |
+| `--vehicle-spec` | `path` | `.json` or SMAT2022 `VehicleType.csv` | `dataset/vehicle_spec.json` | **OHT vehicle specification file**. Speed, acceleration/deceleration, vehicle length, minimum headway, straight/curve speed limits. Default file values = SMAT2022 OHTV0. The flags below override the file values. |
+| `--oht-speed` / `--oht-accel` / `--oht-decel` | `float` | m/s, m/s², m/s² | file values (5 / 2 / 3.5) | Maximum speed, acceleration, deceleration (used in the trapezoidal-kinematics free-flow time) |
+| `--oht-length` / `--oht-headway` | `float` | mm | file values (784 / 125) | Vehicle length and minimum headway. Their sum (footprint, default 909 mm) determines the section capacity of the `queue` model = max(1, ⌊section length / footprint⌋) |
+| `--line-speed` / `--curve-speed` | `float` | m/s | file values (5 / 1) | Speed limits on straight/curved links |
 
-### 출력 결과물
+### Output files
 
-필드 단위 상세 명세는 [output_files.md](output_files.md) 참조. 실행마다 `results/<run_id>/` 디렉토리가 새로 만들어진다 (`run_id` = `YYYY-MM-DD_HH-MM-SS_마이크로초`). 이전 실행을 덮어쓰지 않으며, 한 디렉토리 안의 파일은 모두 같은 기본 이름을 공유한다.
+See [output_files.md](output_files.md) for the field-level specification. Every run creates a new
+`results/<run_id>/` directory (`run_id` = `YYYY-MM-DD_HH-MM-SS_microseconds`). Previous runs are
+never overwritten, and all files in one directory share the same base name.
 
-**기본 이름 (co-simulation)**
+**Base name (co-simulation)**
 
 ```
-<데이터셋>_<일수>d_<OHT>oht_a<알파>_<생산디스패처>_<AMHS전략>_<혼잡>[부가옵션]_s<시드>
-예) HVLM_180d_15oht_a0.05_fifo_fifo_queue_sw120_as10_s0
+<dataset>_<days>d_<OHT>oht_a<alpha>_<production dispatcher>_<AMHS strategy>_<congestion>[extra options]_s<seed>
+e.g. HVLM_180d_15oht_a0.05_fifo_fifo_queue_sw120_as10_s0
 ```
 
-혼잡 약어: `queue` 그대로, `section_local`→`sl`, `global_tip`→`gt`, `off`→`no`. 부가옵션은 기본값이 아닐 때만 붙는다: `_idleon`, `_rdyn`(dynamic routing), `_ms<machine-selection>`, `_sw<일>`(static warm-up), `_as<일>`(AMHS settling).
+Congestion abbreviations: `queue` as is, `section_local`→`sl`, `global_tip`→`gt`, `off`→`no`. Extra
+options are appended only when they differ from the default: `_idleon`, `_rdyn` (dynamic routing),
+`_ms<machine-selection>`, `_sw<days>` (static warm-up), `_as<days>` (AMHS settling).
 
-**기본 이름 (logistics-only)**: `fromto_<레일>_<FromTo>_<초>s_<OHT>oht_<전략>_<혼잡>_s<시드>` (예: `fromto_case1_case1_Fromto_3600s_50oht_nearest_queue_s0`).
+**Base name (logistics-only)**: `fromto_<rail>_<FromTo>_<seconds>s_<OHT>oht_<strategy>_<congestion>_s<seed>`
+(e.g. `fromto_case1_case1_Fromto_3600s_50oht_nearest_queue_s0`).
 
-| 파일 | 생성 조건 | 내용 |
+| File | Created when | Content |
 |---|---|---|
-| `<이름>.json` | 항상 | KPI 요약 + 실행 메타데이터 (아래 표) |
-| `<이름>_lots.csv` | 항상 (co-simulation) | 완료 로트 1행씩: `lot_name, release_at, done_at, deadline_at, cycle_time_days, tardiness_s, waiting_s, processing_s, transport_s, on_time`. 시각은 sim 초. 측정창 필터링(예: `done_at ≥ 130 d`)·분위수 분석의 원천 |
-| `<이름>_trips.csv` | `--viz` | OHT 이송 1건씩: `oht_id, request_time, assignment_time, delivery_time, empty_duration, loaded_duration, total_duration, congestion, empty_path_len, loaded_path_len` |
-| `<이름>_kpi_timeseries.csv` | `--viz` | 주기 스냅샷: `sim_time, busy_oht, section_inflight_sum, pending_queue, cumulative_delivered, max_section_inflight` |
-| `<이름>_machines.csv` | `--viz` (co-simulation) | 장비 가동 구간: `family, start_time, end_time, duration_s` (간트/부하 시각화용) |
-| `<이름>_trajectories.json` | `--viz` | 위 trips·스냅샷·장비 구간과 OHT 초기 위치를 묶은 Rerun 재생 로그 (`ufast.viz.rerun_replay.show_run`) |
-| `results/aggregate/aggregate.{json,csv}` | `ufast-aggregate results/` | 같은 설정(파일 기본 이름에서 `_s<시드>` 제외)끼리 묶은 다중 시드 `mean/std/min/max` 표 |
+| `<name>.json` | always | KPI summary + run metadata (table below) |
+| `<name>_lots.csv` | always (co-simulation) | One row per completed lot: `lot_name, release_at, done_at, deadline_at, cycle_time_days, tardiness_s, waiting_s, processing_s, transport_s, on_time`. Times are in sim seconds. Source for measurement-window filtering (e.g. `done_at ≥ 130 d`) and quantile analysis |
+| `<name>_trips.csv` | `--viz` | One row per OHT transport: `oht_id, request_time, assignment_time, delivery_time, empty_duration, loaded_duration, total_duration, congestion, empty_path_len, loaded_path_len` |
+| `<name>_kpi_timeseries.csv` | `--viz` | Periodic snapshots: `sim_time, busy_oht, section_inflight_sum, pending_queue, cumulative_delivered, max_section_inflight` |
+| `<name>_machines.csv` | `--viz` (co-simulation) | Tool busy intervals: `family, start_time, end_time, duration_s` (for Gantt/load visualisation) |
+| `<name>_trajectories.json` | `--viz` | Rerun replay log bundling the trips, snapshots and tool intervals above with the initial OHT positions (`ufast.viz.rerun_replay.show_run`) |
+| `results/aggregate/aggregate.{json,csv}` | `ufast-aggregate results/` | Multi-seed `mean/std/min/max` table grouped by configuration (base file name without `_s<seed>`) |
 
-**JSON 블록** (co-simulation; logistics-only 는 `production`/`equipment` 대신 `transport` 블록)
+**JSON blocks** (co-simulation; logistics-only has a `transport` block instead of
+`production`/`equipment`)
 
-| 블록 | 주요 키 |
+| Block | Main keys |
 |---|---|
-| `meta` | `mode`(production/fromto), `run_id`, 입력 경로(`dataset_dir`, `rail_file`), `days`/`sim_duration_s`, `num_oht`, `seed`, 정책 슬롯 전부(`dispatcher`, `amhs_strategy`, `congestion_model`, `alpha`, `idle_positioning`, `routing_model`, `machine_selection`), warm-up(`static_warmup_days`, `amhs_settling_days`, `measurement_start_days`), **`vehicle`**(길이·차간·footprint·속도·가감속·직선/곡선 제한속도·출처), `wall_time_s`, `dispatch_steps`. 이 블록만으로 같은 실행을 재현할 수 있다 |
-| `production` | `completed`(**전 구간 누적** 완성 로트 — 측정창 기준 집계는 `_lots.csv` 의 `done_at` 으로), `active`, 이송 횟수(`transport_count`, `static_transport_count`, `skipped_transport`, `same_node_transport`), `by_lot_type`·`by_category`(Regular/Hot/SuperHot 별 throughput·평균/중앙 cycle time·on-time·대기/가공/이송 시간) |
-| `equipment` | 측정창(`measurement_start_s`~`_end_s`), 장비 수, `busy_time_s`, `setup_time_s`, `utilization_pct`, starvation 총량·횟수·분위수, **`transport_blocked_starvation_s/_pct`**(즉시 이송이었다면 없었을 기아) vs `upstream_starvation_s`, 고장/PM 시간, `by_family` 별 내역 |
-| `amhs` | `total_requested_jobs`, `total_jobs`, `avg_free_flow_s`, `avg_transport_s`, `avg_empty_travel_s`, `avg_loaded_travel_s`, `avg_delivery_s`(요청→배달), `avg_oht_wait_s`, `delivery_/transport_{p50,p95,p99,max}_s`, `avg_congestion_factor`, `avg_utilization`, `max_queue`, `max_node_inflight`, queue 모델 전용 `blocked_events`, `blocked_time_s`, `deadlock_forced`, 섹션별 `blocked_by_section`·`blocked_time_by_section`(차단 히트맵 데이터), `reposition_count` |
-| `transport` (logistics-only) | `lots_generated`(요청 수), `lots_completed`, `completion_rate`, `oht_count`, `oht_final_status` |
+| `meta` | `mode` (production/fromto), `run_id`, input paths (`dataset_dir`, `rail_file`), `days`/`sim_duration_s`, `num_oht`, `seed`, all policy slots (`dispatcher`, `amhs_strategy`, `congestion_model`, `alpha`, `idle_positioning`, `routing_model`, `machine_selection`), warm-up (`static_warmup_days`, `amhs_settling_days`, `measurement_start_days`), **`vehicle`** (length, headway, footprint, speed, accel/decel, straight/curve speed limits, source), `wall_time_s`, `dispatch_steps`. This block alone is enough to reproduce the same run |
+| `production` | `completed` (**cumulative over the whole run** — for measurement-window statistics use `done_at` in `_lots.csv`), `active`, transport counts (`transport_count`, `static_transport_count`, `skipped_transport`, `same_node_transport`), `by_lot_type`·`by_category` (throughput, mean/median cycle time, on-time, waiting/processing/transport time per Regular/Hot/SuperHot) |
+| `equipment` | measurement window (`measurement_start_s`~`_end_s`), tool count, `busy_time_s`, `setup_time_s`, `utilization_pct`, starvation total/count/quantiles, **`transport_blocked_starvation_s/_pct`** (starvation that would not have occurred with instantaneous transport) vs `upstream_starvation_s`, breakdown/PM time, per-`by_family` breakdown |
+| `amhs` | `total_requested_jobs`, `total_jobs`, `avg_free_flow_s`, `avg_transport_s`, `avg_empty_travel_s`, `avg_loaded_travel_s`, `avg_delivery_s` (request→delivery), `avg_oht_wait_s`, `delivery_/transport_{p50,p95,p99,max}_s`, `avg_congestion_factor`, `avg_utilization`, `max_queue`, `max_node_inflight`, queue-model-only `blocked_events`, `blocked_time_s`, `deadlock_forced`, per-section `blocked_by_section`·`blocked_time_by_section` (blocking heatmap data), `reposition_count` |
+| `transport` (logistics-only) | `lots_generated` (number of requests), `lots_completed`, `completion_rate`, `oht_count`, `oht_final_status` |
 
-`ufast-analyze [json]` 은 이 JSON 을 읽어 콘솔 리포트(문헌 참조값 대비 포함)를 출력한다. 섹션별 **점유** 히트맵 원시값(`*_sections.csv`)은 실행기 출력이 아니라 `scripts/make_queue_occupancy_heatmap.py` 가 계측 런을 돌려 만든다.
+`ufast-analyze [json]` reads this JSON and prints a console report (including a comparison with
+literature reference values). The raw values of the per-section **occupancy** heatmap
+(`*_sections.csv`) are not a runner output; they are produced by
+`scripts/make_queue_occupancy_heatmap.py`, which performs an instrumented run.
 
 ---
 
-## 2. Fromto(logistics-only) 모드 실행기 (`python -m ufast.cosim.run_fromto` / `ufast-fromto`)
+## 2. Fromto (logistics-only) runner (`python -m ufast.cosim.run_fromto` / `ufast-fromto`)
 
-생산 데이터(SMT2020 route/order/tool)가 없는 입력 시나리오에서, 레일 레이아웃과 fromto.dat(반송 수요표)만으로 AMHS 물류 시뮬레이션을 실행합니다. co-simulation 실행기와 **같은 `AMHSExecutor`** 를 쓰므로 용량 제약 blocking(queue)·데드락 해소·운동학 자유주행·배차/라우팅/idle 전략·커스텀 플러그인·KPI JSON/CSV·Rerun 재생이 동일합니다. 이벤트 큐만 생산층 대신 `HeapInstance` 가 맡습니다.
+For input scenarios without production data (SMT2020 route/order/tool), runs the AMHS logistics
+simulation from the rail layout and fromto.dat (transport demand table) only. It uses the **same
+`AMHSExecutor`** as the co-simulation runner, so capacity-constrained blocking (queue), deadlock
+resolution, kinematic free-flow, assignment/routing/idle strategies, custom plugins, KPI JSON/CSV and
+Rerun replay are identical. Only the event queue is handled by `HeapInstance` instead of the
+production layer.
 
-### 실행 명령어 구조
+### Command structure
 ```bash
 PYTHONPATH=src python -m ufast.cosim.run_fromto [rail_file] [fromto_file] [options]
 ```
 
-### 위치 인수 (Positional Arguments)
-* **`rail_file`**: `.rail` 레이아웃 파일 (기본값: `dataset/case1.rail`)
-* **`fromto_file`**: `fromto.dat` — 탭 구분 텍스트, 각 행 `from_eq \t to_eq \t rate_per_hour` (3열은 시간당 발생율[건/시간], 행 순서가 시간대 순서; `3600/rate` 초 고정 간격으로 이벤트 생성) (기본값: `dataset/case1_Fromto.dat`)
+### Positional Arguments
+* **`rail_file`**: `.rail` layout file (default: `dataset/case1.rail`)
+* **`fromto_file`**: `fromto.dat` — tab-separated text, each row `from_eq \t to_eq \t rate_per_hour`
+  (the 3rd column is the rate per hour [events/hour]; row order is the order of time periods;
+  events are generated at a fixed interval of `3600/rate` seconds) (default:
+  `dataset/case1_Fromto.dat`)
 
-### 상세 CLI 옵션 (Options)
+### Detailed CLI Options
 
-| 옵션명 | 타입 | 선택지 및 포맷 | 기본값 | 설명 및 영향 |
+| Option | Type | Choices / format | Default | Description and effect |
 | :--- | :--- | :--- | :--- | :--- |
-| `--oht` | `int` | 양의 정수 | `50` | OHT 차량 대수 (Fleet Size) |
-| `--duration` | `float` | 양의 실수 | `3600.0` | 시뮬레이션 종료 시각 (sim 초) |
-| `--seed` | `int` | 정수 | `0` | 난수 시드값 |
-| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `nearest` | OHT 배차(Assignment) 전략 (co-simulation 과 동일) |
-| `--congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | 혼잡 모델 — §1 과 동일 |
-| `--alpha` | `float` | 실수 | `0.05` | delay 모델의 혼잡 계수 α |
-| `--idle` / `--routing` | `str` | `off`/`on`, `off`/`dynamic` | `off` | idle 재배치, 혼잡 반응 재라우팅 — §1 과 동일 |
-| `--custom-routing` / `--custom-assignment` / `--custom-idle` / `--custom-routing-cost` | `path` | `.py` / `.pkl` | 없음 | 커스텀 전략 플러그인 — §1 과 동일. 파일 이름만 주면 `strategies/` 에서 찾음 |
-| `--vehicle-spec` | `path` | `.json` 또는 SMAT2022 `VehicleType.csv` | `dataset/vehicle_spec.json` | **OHT 차량 제원 파일**. 속도·가감속·차량 길이·최소 차간·직선/곡선 제한속도. 기본 파일 값 = SMAT2022 OHTV0. 아래 플래그가 파일 값을 덮어씁니다. |
-| `--oht-speed` / `--oht-accel` / `--oht-decel` | `float` | m/s, m/s², m/s² | 파일 값 (5 / 2 / 3.5) | 최고속도·가속도·감속도 (사다리꼴 운동학 자유주행 시간에 반영) |
-| `--oht-length` / `--oht-headway` | `float` | mm | 파일 값 (784 / 125) | 차량 길이·최소 차간. 합(footprint, 기본 909 mm)으로 `queue` 모델의 섹션 용량 = max(1, ⌊섹션 길이 / footprint⌋) 결정 |
-| `--line-speed` / `--curve-speed` | `float` | m/s | 파일 값 (5 / 1) | 직선/곡선 링크 제한속도 |
-| `--strict` | `flag` | `--strict` 추가 시 활성화 | `False` | **입력 정합성 엄격 모드**. fromto.dat 이 참조하는 설비가 레일 레이아웃의 EQ 목록에 없으면 실행을 중단합니다. 기본 동작은 미매칭 요약을 경고로 출력하고 해당 레코드를 이벤트 생성에서 제외합니다. |
-| `--viz` | `flag` | `--viz` 추가 시 활성화 | `False` | Rerun 시각화 데이터 생성 및 재생 |
-| `--engine` | `str` | `amhs`<br>`legacy` | `amhs` | `legacy` 는 이전 GUI 컨트롤러 기반 실행기(`run_legacy.py`: 상수 속도 1 m/s, blocking 없음) — 비교·회귀 용도 |
+| `--oht` | `int` | positive integer | `50` | Number of OHT vehicles (fleet size) |
+| `--duration` | `float` | positive real | `3600.0` | Simulation end time (sim seconds) |
+| `--seed` | `int` | integer | `0` | Random seed |
+| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `nearest` | OHT assignment strategy (same as co-simulation) |
+| `--congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | Congestion model — same as §1 |
+| `--alpha` | `float` | real | `0.05` | Congestion coefficient α of the delay models |
+| `--idle` / `--routing` | `str` | `off`/`on`, `off`/`dynamic` | `off` | Idle repositioning, congestion-reactive re-routing — same as §1 |
+| `--custom-routing` / `--custom-assignment` / `--custom-idle` / `--custom-routing-cost` | `path` | `.py` / `.pkl` | none | Custom strategy plugins — same as §1. A bare file name is looked up in `strategies/` |
+| `--vehicle-spec` | `path` | `.json` or SMAT2022 `VehicleType.csv` | `dataset/vehicle_spec.json` | **OHT vehicle specification file**. Speed, acceleration/deceleration, vehicle length, minimum headway, straight/curve speed limits. Default file values = SMAT2022 OHTV0. The flags below override the file values. |
+| `--oht-speed` / `--oht-accel` / `--oht-decel` | `float` | m/s, m/s², m/s² | file values (5 / 2 / 3.5) | Maximum speed, acceleration, deceleration (used in the trapezoidal-kinematics free-flow time) |
+| `--oht-length` / `--oht-headway` | `float` | mm | file values (784 / 125) | Vehicle length and minimum headway. Their sum (footprint, default 909 mm) determines the section capacity of the `queue` model = max(1, ⌊section length / footprint⌋) |
+| `--line-speed` / `--curve-speed` | `float` | m/s | file values (5 / 1) | Speed limits on straight/curved links |
+| `--strict` | `flag` | enabled when `--strict` is given | `False` | **Strict input consistency mode**. Aborts the run if fromto.dat references equipment that is not in the EQ list of the rail layout. The default behaviour prints a summary of unmatched names as a warning and excludes those records from event generation. |
+| `--viz` | `flag` | enabled when `--viz` is given | `False` | Generate and replay Rerun visualisation data |
+| `--engine` | `str` | `amhs`<br>`legacy` | `amhs` | `legacy` is the previous GUI-controller-based runner (`run_legacy.py`: constant speed 1 m/s, no blocking) — for comparison and regression |
 
-### 입력 정합성 (Data Consistency)
-두 실행기 모두 시뮬레이션 시작 전에 입력 간 이름 매칭을 검사해 `consistency[...]` 요약 한 줄을 출력합니다.
-* **fromto 모드**: fromto.dat 의 from/to 설비명 ↔ `.rail` 의 EQ 목록 (정확 일치)
-* **production 모드**: tool.txt 의 STNFAM ↔ `.rail` 의 eq_to_node(대소문자 무시) 또는 `Equipment.csv` 매핑
-* 미매칭 항목은 기본적으로 **경고 후 스킵**되며(결과 왜곡 가능), `--strict` 를 주면 즉시 종료 코드 1로 중단합니다.
+### Input consistency (Data Consistency)
+Both runners check name matching between inputs before the simulation starts and print a one-line
+`consistency[...]` summary.
+* **fromto mode**: from/to equipment names in fromto.dat ↔ EQ list of the `.rail` (exact match)
+* **production mode**: STNFAM in tool.txt ↔ eq_to_node of the `.rail` (case-insensitive) or the
+  `Equipment.csv` mapping
+* Unmatched entries are **skipped with a warning** by default (results may be distorted); with
+  `--strict` the run aborts immediately with exit code 1.
 
 ---
 
-## 3. 베이스라인 비교 및 캐싱 스크립트 (`scripts/compare_baselines.py`)
+## 3. Baseline comparison and caching script (`scripts/compare_baselines.py`)
 
-PySCFabSim(생산 전용), LogiFabSim(생산 + 단순 대기행렬 물류), U-FAST(생산 + 물리적 AMHS)의 결과를 비교 분석하고, 3-way KPI 그래프 및 성능 요약 보고서를 일괄 집계하는 실험 자동화 스크립트입니다.
+Experiment automation script that compares the results of PySCFabSim (production only),
+LogiFabSim (production + simple queueing logistics) and U-FAST (production + physical AMHS), and
+batch-produces 3-way KPI plots and a performance summary report.
 
-### 실행 명령어 구조
+### Command structure
 ```bash
 python scripts/compare_baselines.py [options]
 ```
 
-### 상세 CLI 옵션 (Options)
+### Detailed CLI Options
 
-| 옵션명 | 타입 | 선택지 및 포맷 | 기본값 | 설명 및 영향 |
+| Option | Type | Choices / format | Default | Description and effect |
 | :--- | :--- | :--- | :--- | :--- |
-| `--days` | `int` | 양의 정수 | `30` | **시뮬레이션 기간**. 베이스라인 생성 및 U-FAST 실행의 기준 기간입니다. |
-| `--datasets` | `list` | `HVLM` / `LVHM` / `LVLM`<br>(여러 개 입력 가능) | `["HVLM", "LVHM", "LVLM"]` | **실험할 생산 데이터셋 목록**. 공백으로 구분하여 다중 지정이 가능합니다. (예: `--datasets HVLM LVLM`) |
-| `--seed` | `int` | 정수 | `0` | 난수 생성을 위한 시드값. |
-| `--dispatcher` | `str` | `fifo` / `random` / `cr` 등 | `fifo` | 시뮬레이터들에 적용할 생산 Dispatching 룰. |
-| `--alg` | `str` | `l4m`<br>`m4l` | `l4m` | **Lot allocation 알고리즘**.<br>• `l4m` (기본): 설비 기준 매칭 (Lot-for-Machine)<br>• `m4l`: 랏 기준 매칭 (Machine-for-Lot) |
-| `--oht` | `int` | 양의 정수 | `100` | U-FAST Co-Sim을 가동할 때 배치할 OHT 대수. |
-| `--simulators` | `list` | `pysc` / `logi` / `fills`<br>(여러 개 입력 가능) | `["pysc", "logi", "fills"]` | **평가 및 비교할 시뮬레이터 목록**. 캐싱된 데이터를 분석할 때 특정 시뮬레이터만 선택적으로 지정하여 동작 시간을 조율할 수 있습니다. |
-| `--logi-cf` | `list` | `none` / `flat` / `linear` / `exp` | `["none"]` | LogiFabSim의 물류 혼잡 가중치(Congestion Factor) 옵션 리스트. |
-| `--out-dir` | `str` | 폴더 경로 | `results/baseline_compare` | 그래프 및 집계표 결과물(`.csv`, `.png`)이 저장될 디렉토리. |
-| `--summarize-only` | `flag` | `--summarize-only` 추가 시 활성화 | `False` | **리포트 재생성 모드**. 시뮬레이션을 다시 수행하지 않고, 이미 `--out-dir`에 저장된 시뮬레이터별 결과 JSON 파일들만 모아 그래프와 요약 리포트만 새로 빌드하고자 할 때 사용합니다. |
-| `--baseline-python` | `str` | 실행 파일 경로 | `None` | **베이스라인 시뮬레이터 전용 Python 실행 경로**. 베이스라인 시뮬레이터의 성능 비교나 고속 측정을 위해 별도의 인터프리터(예: `PyPy3` 바이너리 경로)를 지정할 수 있습니다. 미지정 시 U-FAST와 동일한 파이썬으로 가동됩니다. |
-| `--fills-source` | `str` | `run`<br>`load` | `run` | **U-FAST 결과 로드 방식**.<br>• `run`: U-FAST를 실시간으로 새로 시뮬레이션하여 비교합니다.<br>• `load`: 기존에 수행되어 캐시나 출력 경로에 존재하는 U-FAST 결과 파일을 불러옵니다. |
-| `--warmup-days` | `float` | 양의 실수 | `0.0` | **통계 집계 제외 기간** (일 단위). 초기 웜업 구간의 불안정한 Lot 완료 통계를 필터링하여 정상 상태(Steady-State)의 데이터만 KPI에 집계하고자 할 때 적용합니다. |
-| `--static-warmup-days` | `float` | 양의 실수 | `0.0` | U-FAST Co-Sim 실행 시 전달할 정적 웜업 일수. |
-| `--amhs-settling-days` | `float` | 양의 실수 | `0.0` | U-FAST Co-Sim 실행 시 전달할 AMHS 안정화 일수. |
-| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | U-FAST Co-Sim 실행 시 전달할 설비 선택 모드. |
-| `--mode` | `str` | `compare`<br>`sweep` | `compare` | **작동 방식 모드**.<br>• `compare`: 3-way KPI 비교를 수행하고 성능 표와 그래프를 그립니다.<br>• `sweep`: OHT 대수 변화(fleet size)에 따른 Sweep 실험과 Logi CF 오버레이 플롯을 생성합니다. |
-| `--oht-list` | `list` | 정수 리스트 | `[20, 30, 50, 100, 200]` | `sweep` 모드일 때 U-FAST에서 테스트할 OHT 대수 범위 목록. |
+| `--days` | `int` | positive integer | `30` | **Simulation horizon**. Reference horizon for baseline generation and U-FAST runs. |
+| `--datasets` | `list` | `HVLM` / `LVHM` / `LVLM`<br>(multiple allowed) | `["HVLM", "LVHM", "LVLM"]` | **Production datasets to experiment on**. Several may be given separated by spaces (e.g. `--datasets HVLM LVLM`). |
+| `--seed` | `int` | integer | `0` | Seed for random number generation. |
+| `--dispatcher` | `str` | `fifo` / `random` / `cr` etc. | `fifo` | Production dispatching rule applied to the simulators. |
+| `--alg` | `str` | `l4m`<br>`m4l` | `l4m` | **Lot allocation algorithm**.<br>• `l4m` (default): tool-based matching (Lot-for-Machine)<br>• `m4l`: lot-based matching (Machine-for-Lot) |
+| `--oht` | `int` | positive integer | `100` | Number of OHTs deployed when running the U-FAST co-sim. |
+| `--simulators` | `list` | `pysc` / `logi` / `fills`<br>(multiple allowed) | `["pysc", "logi", "fills"]` | **Simulators to evaluate and compare**. When analysing cached data you can select only specific simulators to control the run time. |
+| `--logi-cf` | `list` | `none` / `flat` / `linear` / `exp` | `["none"]` | List of LogiFabSim logistics congestion factor (CF) options. |
+| `--out-dir` | `str` | folder path | `results/baseline_compare` | Directory where the plots and summary tables (`.csv`, `.png`) are stored. |
+| `--summarize-only` | `flag` | enabled when `--summarize-only` is given | `False` | **Report regeneration mode**. Use when you only want to rebuild the plots and summary report from the per-simulator result JSON files already stored in `--out-dir`, without re-running the simulations. |
+| `--baseline-python` | `str` | executable path | `None` | **Python interpreter used for the baseline simulators only**. A separate interpreter (e.g. the path to a `PyPy3` binary) can be given for baseline performance comparison or fast measurement. If not given, the baselines run with the same Python as U-FAST. |
+| `--fills-source` | `str` | `run`<br>`load` | `run` | **How U-FAST results are obtained**.<br>• `run`: run a fresh U-FAST simulation live and compare.<br>• `load`: load U-FAST result files from a previous run present in the cache or output path. |
+| `--warmup-days` | `float` | positive real | `0.0` | **Period excluded from statistics** (days). Filters out the unstable lot-completion statistics of the initial warm-up period so that only steady-state data enter the KPIs. |
+| `--static-warmup-days` | `float` | positive real | `0.0` | Static warm-up days passed to the U-FAST co-sim run. |
+| `--amhs-settling-days` | `float` | positive real | `0.0` | AMHS settling days passed to the U-FAST co-sim run. |
+| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | Tool selection mode passed to the U-FAST co-sim run. |
+| `--mode` | `str` | `compare`<br>`sweep` | `compare` | **Operating mode**.<br>• `compare`: performs the 3-way KPI comparison and draws the performance tables and plots.<br>• `sweep`: runs the fleet-size sweep over the number of OHTs and produces the Logi CF overlay plot. |
+| `--oht-list` | `list` | list of integers | `[20, 30, 50, 100, 200]` | List of OHT fleet sizes to test with U-FAST in `sweep` mode. |
 
 ---
 
-### 💡 베이스라인 캐시 (Baseline Cache) 작동 원리
+### 💡 How the baseline cache works
 
-`PySCFabSim`과 `LogiFabSim`은 매 실행마다 물류 흐름이 정적이거나 모사 방식이 고정되어 있어 난수 시드와 기간이 동일하다면 완벽히 일관된(Deterministic) 결과를 보장합니다.
+`PySCFabSim` and `LogiFabSim` have static logistics flows or a fixed emulation method on every run,
+so with the same random seed and horizon they guarantee fully deterministic results.
 
-따라서 불필요한 시뮬레이션 연산 낭비를 막기 위해 다음과 같은 캐싱 정책이 작동합니다.
-1. `compare_baselines.py`는 시뮬레이션을 돌리기 전 `results/baseline/` 디렉토리를 탐색합니다.
-2. `[simulator]_[dataset]_[days]d_s[seed]_[cf].json` 형태의 캐시 파일이 존재하면, **시뮬레이터를 직접 가동하지 않고 캐시된 데이터를 즉시 복원**합니다.
-3. 복원 시, 사용자가 CLI 파라미터로 넘긴 `--warmup-days` 등의 통계 제외 기간을 즉시 재계산(Re-aggregation)하여 필터링하므로, 캐시가 있더라도 유연하게 집계 구간을 조율할 수 있습니다.
-4. 만약 캐시가 존재하지 않는다면 최초 1회 전체 시뮬레이션을 가동한 뒤, 캐시 디렉토리에 자동으로 기록하여 다음 실행부터 재사용합니다.
+To avoid wasting simulation time, the following caching policy is therefore applied.
+1. Before running a simulation, `compare_baselines.py` scans the `results/baseline/` directory.
+2. If a cache file of the form `[simulator]_[dataset]_[days]d_s[seed]_[cf].json` exists, **the
+   simulator is not run and the cached data are restored immediately**.
+3. On restore, statistics-exclusion periods passed on the CLI such as `--warmup-days` are
+   re-aggregated on the fly, so the aggregation window can be adjusted flexibly even with a cache.
+4. If no cache exists, the full simulation is run once and written to the cache directory
+   automatically for reuse from the next run on.
 
 > [!TIP]
-> **대용량 베이스라인 캐시 활용하기:**
-> 장기간(예: 365일) 베이스라인 데이터를 미리 한 번 구축해두면, U-FAST의 제어 전략(`--machine-selection nearest` 등)을 고속 튜닝하면서 매번 1초 만에 베이스라인 비교 그래프를 도출할 수 있습니다.
+> **Using a large baseline cache:**
+> Build the long-horizon (e.g. 365-day) baseline data once in advance; then, while rapidly tuning
+> U-FAST control strategies (`--machine-selection nearest` etc.), the baseline comparison plots can
+> be produced in about one second each time.
 
 > [!TIP]
-> **현업 및 연구용 추천 최적화 조합 (속도 + 물리 정밀성):**
-> 현업 및 연구용으로 **"속도와 현실적인 물리성"**을 모두 잡기 위해 가장 추천하는 실질적인 Baseline 조합은 바로 `--machine-selection exact` + `--routing off` 입니다. 이 조합 하에서 최적화 성능 튜닝을 하시면 훌륭한 신뢰성과 실행 속도를 동시에 얻으실 수 있습니다.
+> **Recommended optimisation combination for practice and research (speed + physical fidelity):**
+> The most practical baseline combination that gives both **"speed and realistic physics"** for
+> industrial and research use is `--machine-selection exact` + `--routing off`. Tuning under this
+> combination yields excellent reliability and execution speed at the same time.
 >
-> **💡 라우팅 옵션과 실시간 혼잡 반영 메커니즘 안내:**
-> U-FAST 시뮬레이터에서 경로 선택과 물리적 주행 시뮬레이션은 독립적으로 동작합니다. 따라서 `--routing off` 상태에서도 실시간 혼잡으로 인한 감속 페널티가 정상적으로 반영됩니다.
-> * **1. 실시간으로 반영되는 것 (물리적 주행 시간 지연):**
->   `--congestion section_local` (기본값) 모델에 의해 OHT 차량이 레일 구간(Section)을 하나씩 통과하는 매 순간마다, 해당 구간을 달리고 있는 다른 OHT의 실시간 대수를 확인합니다. 만약 앞차들이 밀려 있어서 해당 구간에 OHT가 4대 있다면, 통과 시간 계산식인 `Base시간 * (1 + alpha * 4)`에 따라 속도가 줄어들어 **실시간 지연(Congestion Delay)이 물리적으로 정상 발생**합니다.
->   따라서 설비를 `exact`로 고를 때도 "해당 설비까지 정적 최단 거리로 달릴 때의 가감속 소요 시간"을 기준으로 판단하되, 실제 출발한 후에는 레일 위 상황에 따라 딜레이가 실시간으로 쌓이게 됩니다.
-> * **2. 반영하지 않는 것 (실시간 혼잡 우회 경로 재탐색):**
->   * `--routing off` (추천): 차량이 출발지부터 목적지까지 갈 때 무조건 고정된 정적 최단 거리 경로로만 달립니다. 가령 앞에 차량 10대가 밀려 있어도 "우회하지 않고 묵묵히 그 경로로 가겠다"는 뜻입니다. (다만 1번의 룰에 의해 엄청난 감속 딜레이를 겪게 됩니다.) ➡️ *실제 Fab 물류 제어에 가장 가깝고, 연산이 매우 빠름.*
->   * `--routing dynamic`: 차량이 길을 찾을 때 "지금 레일 상황을 보니 저 구간이 꽉 막혔으니, 조금 멀더라도 뻥 뚫린 우회로로 돌아가야지" 하고 혼잡도에 따라 매번 새로운 다익스트라 경로를 탐색하는 모드입니다. 이 우회 경로 탐색은 경로 탐색 연산량이 엄청나기 때문에 실행 시간이 기하급수적으로 느려집니다.
+> **💡 Routing options and how real-time congestion is reflected:**
+> In the U-FAST simulator, route selection and the physical driving simulation operate
+> independently. Therefore, even with `--routing off`, slowdown penalties caused by real-time
+> congestion are still applied normally.
+> * **1. What is reflected in real time (physical travel-time delay):**
+>   With the `--congestion section_local` (default) model, every time an OHT passes through a rail
+>   section, the real-time number of other OHTs travelling in that section is checked. If vehicles
+>   ahead are backed up and there are 4 OHTs in the section, the speed is reduced according to the
+>   traversal-time formula `Base time * (1 + alpha * 4)`, so **real-time congestion delay occurs
+>   physically as expected**.
+>   Thus even when tools are chosen with `exact`, the decision is based on "the accel/decel travel
+>   time along the static shortest route to that tool", but once the vehicle departs, delay
+>   accumulates in real time according to the situation on the rail.
+> * **2. What is not reflected (real-time detour re-routing around congestion):**
+>   * `--routing off` (recommended): the vehicle always drives the fixed static shortest route from
+>     origin to destination. Even with 10 vehicles backed up ahead it "does not detour and keeps
+>     following that route" (though it suffers a large slowdown delay under rule 1). ➡️ *Closest to
+>     real fab logistics control, and very fast to compute.*
+>   * `--routing dynamic`: whenever the vehicle searches for a route it looks at the current rail
+>     state and, if a section is jammed, takes a somewhat longer but clear detour — a fresh
+>     congestion-aware Dijkstra search every time. This detour search is computationally very
+>     expensive, so the run time grows dramatically.
 
 ---
 
-## 4. 자주 사용하는 실행 시나리오 (Recipes)
+## 4. Frequently used execution scenarios (Recipes)
 
-### 🚀 시나리오 A: Co-Simulation 1일 시연 및 Rerun 시각화
-가장 빠르게 co-simulation의 가동 상태를 눈으로 확인하고 OHT 이동 선로를 3D/2D로 재생하고자 할 때 사용합니다.
+### 🚀 Scenario A: 1-day co-simulation demo with Rerun visualisation
+The quickest way to see the co-simulation running and replay the OHT movements on the rail in
+3D/2D.
 ```bash
 PYTHONPATH=src python -m ufast.cosim.run dataset/HVLM dataset/SMAT2022.rail --days 1 --oht 150 --viz
 ```
 
-### ⚡ 시나리오 B: U-FAST 초고속 시뮬레이션 (Warm-up 최적화 및 nearest 적용)
-60일 장기 시뮬레이션을 수행하되, 웜업 단계를 정적 시간 상수로 가속하고 최단 거리 설비 선택을 결합하여 가동 시간을 약 80% 이상 단축합니다.
+### ⚡ Scenario B: very fast U-FAST simulation (warm-up optimisation + nearest selection)
+Runs a 60-day long simulation while accelerating the warm-up phase with static time constants and
+combining it with nearest-distance tool selection, cutting the run time by roughly 80% or more.
 ```bash
 PYTHONPATH=src python -m ufast.cosim.run dataset/HVLM dataset/SMAT2022.rail --days 60 --static-warmup-days 50 --amhs-settling-days 5 --machine-selection nearest
 ```
 
-### 📊 시나리오 C: 베이스라인 1년(365일)치 대규모 캐시 빌드
-U-FAST를 돌리지 않고, 생산 전용 시뮬레이터 PySC와 Logi의 1년치 기준 성능 지표를 모두 계산하여 `results/baseline/` 캐시 폴더에 영구적으로 보존합니다.
+### 📊 Scenario C: building a large one-year (365-day) baseline cache
+Without running U-FAST, computes the one-year reference performance metrics of the production-only
+simulators PySC and Logi and stores them permanently in the `results/baseline/` cache folder.
 ```bash
 python scripts/compare_baselines.py --days 365 --simulators pysc logi --datasets HVLM LVHM LVLM
 ```
 
-### 📈 시나리오 D: 캐시 데이터 기반 U-FAST 성능 비교 분석
-이미 구축된 365일 베이스라인 캐시 데이터를 복원하여 로드하고, U-FAST만 빠르게 60일(웜업 50일 적용) 시뮬레이션하여 3개 엔진의 성능을 3-way 비교 플롯 및 CSV로 집계합니다.
+### 📈 Scenario D: U-FAST performance comparison from cached data
+Restores and loads the already built 365-day baseline cache, runs only U-FAST quickly for 60 days
+(with a 50-day warm-up), and aggregates the performance of the three engines into a 3-way
+comparison plot and CSV.
 ```bash
 python scripts/compare_baselines.py --days 60 --static-warmup-days 50 --warmup-days 50 --machine-selection nearest --simulators pysc logi fills
 ```
 
-### 🔍 시나리오 E: OHT 대수 변화(Fleet Size)에 따른 성능 Sweep 분석
-OHT 차량 대수를 20대부터 200대까지 점진적으로 증가시키며 U-FAST 성능 추이를 수집하고, Logi CF(Congestion Factor) 옵션들과 오버레이하여 물류 병목 현상을 비교하는 시각화 플롯을 도출합니다.
+### 🔍 Scenario E: performance sweep over the OHT fleet size
+Gradually increases the number of OHT vehicles from 20 to 200 to collect the U-FAST performance
+trend, and produces a visualisation that overlays the Logi CF (congestion factor) options to compare
+logistics bottleneck behaviour.
 ```bash
 python scripts/compare_baselines.py --days 30 --mode sweep --oht-list 20 50 100 150 200 --datasets HVLM
 ```
