@@ -128,11 +128,11 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
     # falls back to node_list[0]/[-1], which does not affect ufast routing accuracy.
     bridge = SectionNodeBridge(rm)
     bridge.build_mapping()
-    # F-perf — under static ufast routing the result of estimate_section_route_cost
+    # Performance optimization: under static ufast routing the result of estimate_section_route_cost
     # does not change (no dynamic traffic_penalty variation), so caching is safe and
     # essential. Compresses the dispatcher cost of the nearest/congestion strategies
     # to single-digit ms.
-    # Phase 2 — under static routing (routing_model != 'dynamic') the free-flow route
+    # Under static routing (routing_model != 'dynamic') the free-flow route
     # is immutable, so the section route cache is made permanent (TTL=∞) to remove
     # repeated Dijkstra runs. Dynamic routing changes routes with congestion, so it
     # keeps the existing TTL (5 s) plus clear_route_cost_cache() invalidation on
@@ -178,7 +178,7 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
               f"AMHS settling {warmup_policy.amhs_settling_days}d, "
               f"KPI from {warmup_policy.measurement_start_days}d")
 
-    # F17 — Custom strategy plugins (optional). Loaded and injected when a path is non-empty.
+    # Custom strategy plugins (optional). Loaded and injected when a path is non-empty.
     custom_used = _inject_custom_strategies(
         amhs, rm, bridge, routing=custom_routing_path,
         assignment=custom_assignment_path, idle_positioning=custom_idle_path,
@@ -196,7 +196,7 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
                             machine_equipment=machine_equipment,
                             machine_selection=machine_selection,
                             warmup_policy=warmup_policy)
-    # F10 — schedule the first idle reposition tick (no-op when idle_positioning='off').
+    # Schedule the first idle reposition tick (no-op when idle_positioning='off').
     amhs.schedule_first_reposition(0.0)
     disp = dispatcher_map[dispatcher]
     print(f"[U-FAST] production: machines {len(instance.machines)} / lots {len(instance.dispatchable_lots)}")
@@ -247,7 +247,7 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
     }
     results = collect_results(instance, amhs, meta)
     out_path = save_results(results, auto_result_path(DEFAULT_RESULTS_DIR, meta))
-    # F16 — also export the 4 CSVs (skipped automatically when there is no data)
+    # Also export the 4 CSVs (skipped automatically when there is no data)
     csv_paths = save_csv_exports(
         out_path,
         trip_log=amhs.trip_log,
@@ -260,7 +260,7 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
               f"{', '.join(os.path.basename(p) for p in csv_paths)}")
     analyze_one(out_path)
 
-    # ── Visualisation (Phase 2 + 3a: layout + OHT trajectories + machine activity replay) ──
+    # ── Visualisation (layout + OHT trajectories + machine activity replay) ──
     if viz:
         traj_path = out_path.replace('.json', '_trajectories.json')
         try:
@@ -282,7 +282,7 @@ def run_ufast(dataset_dir: str, rail_file: str, days: int = 1,
                   f"family {len(family_sizes)})")
 
             from ufast.viz.rerun_replay import show_run
-            print("[U-FAST] starting Rerun visualisation (Phase 2 + 3a)...")
+            print("[U-FAST] starting Rerun visualisation...")
             show_run(rail_file, traj_path)
         except Exception as e:
             print(f"[U-FAST] ⚠️  visualisation failed: {e}")

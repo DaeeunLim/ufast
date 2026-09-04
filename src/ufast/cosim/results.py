@@ -86,7 +86,7 @@ def _percentile(sorted_vals: List[float], q: float) -> float:
 
 
 def _tail_stats(samples: List[float], prefix: str) -> Dict[str, float]:
-    """Tail statistics of measurement-window samples — for testing H2 (delivery-time tail vs production KPIs)."""
+    """Tail statistics of measurement-window samples (delivery-time tail vs production KPIs)."""
     s = sorted(samples)
     return {
         f'{prefix}_p50_s': round(_percentile(s, 50), 2),

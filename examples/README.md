@@ -1,4 +1,4 @@
-# src/examples — custom strategy plugin examples
+# examples/ — custom strategy plugin examples
 
 ## Role
 
@@ -23,7 +23,7 @@ new assignment/routing algorithm.
 - Put your own strategy in the `strategies/` folder and pass only the file name
   (`strategies/README.md`). When a strategy file is specified in the GUI settings or on the CLI
   (`--custom-assignment` / `--custom-routing` / `--custom-idle` / `--custom-routing-cost`),
-  `strategy_loader.load_strategy()` loads it and `control/controllers.py`·`ufast/amhs.py` call it
+  `strategy_loader.load_strategy()` loads it and `control/controllers.py`·`cosim/amhs.py` call it
   during the run.
 - Note: when a custom routing_cost function is set, the C-accelerated path-search engine
   (`route/fast_pathfinder`) is disabled and the pure-Python path is used — a slower run during

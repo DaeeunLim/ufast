@@ -6,7 +6,7 @@ Standalone:
     python3 -m ufast.viz.rerun_layout --rail dataset/SMAT2022.rail
     python3 -m ufast.viz.rerun_layout --no-spawn --save layout.rrd
 
-As a library (reused by the Phase 2 replay):
+As a library (reused by the replay):
     from ufast.viz.rerun_layout import log_layout_entities, show_layout
     show_layout('dataset/SMAT2022.rail')           # init + log + (optional) viewer
     log_layout_entities('dataset/SMAT2022.rail')   # assumes init; log only

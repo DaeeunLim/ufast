@@ -6,10 +6,11 @@ differ only in seed, and computes mean / std / min / max of each KPI per
 configuration.
 
 Usage:
-  python3 ufast/cosim/aggregate.py                       # collect all of results/ automatically
-  python3 ufast/cosim/aggregate.py results/HVLM*         # explicit paths/globs
-  python3 ufast/cosim/aggregate.py --out results/agg     # output folder
-  python3 ufast/cosim/aggregate.py --metrics amhs.avg_transport_s production.by_category.Regular.avg_cycle_days
+  ufast-aggregate                                       # collect all of results/ automatically
+  ufast-aggregate results/HVLM*                         # explicit paths/globs
+  ufast-aggregate --out results/agg                     # output folder
+  ufast-aggregate --metrics amhs.avg_transport_s production.by_category.Regular.avg_cycle_days
+  (or: python3 -m ufast.cosim.aggregate ...)
 
 Behaviour:
   - Groups runs by a "configuration key": the meta of each result JSON minus

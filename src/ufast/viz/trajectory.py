@@ -1,12 +1,12 @@
 """
 viz/trajectory.py — OHT trajectory data structures + position interpolation + JSON save/load.
 
-ufast/amhs.py accumulates trip data as dicts each time a trip completes; at the
+ufast/cosim/amhs.py accumulates trip data as dicts each time a trip completes; at the
 end of the simulation they are bundled into a TrajectoryLog and saved to
 results/<run_id>/*_trajectories.json.
 viz/rerun_replay.py reads that file and interpolates OHT positions at time t.
 
-Interpolation method (Phase 2 v1):
+Interpolation method:
   - Linear interpolation along the path by cumulative-distance fraction.
   - Visual smoothness is favoured over kinematic accuracy (per-edge times).
   - Split per leg: empty leg (OHT -> pickup) -> loaded leg (pickup -> delivery).
@@ -55,7 +55,7 @@ class TrajectoryLog:
     machine_activities: List[Dict[str, Any]] = field(default_factory=list)
     # family -> total machine count — used for the load-ratio (active/total) colour gradient
     family_sizes: Dict[str, int] = field(default_factory=dict)
-    # F12 — KPI time-series snapshot tuple list:
+    # KPI time-series snapshot tuple list:
     #   [(sim_time, busy_count, section_inflight_sum, pending_queue,
     #     delivered_count, max_section_inflight), ...]
     kpi_snapshots: List[List[Any]] = field(default_factory=list)

@@ -261,7 +261,7 @@ class AMHSExecutor:
                 f"(expected one of {self.ROUTING_MODELS})")
         self.routing_model = routing_model
 
-        # ── Idle vehicle positioning (F10) ──
+        # ── Idle vehicle positioning ──
         # 'off'         : disabled — IDLE OHTs stay in the section they arrived in.
         # 'spread'      : 1-hop move to the adjacent section with fewer inflight OHTs.
         #                 Simplified version of reposition_idle_ohts from fromto-mode legacy.
@@ -363,20 +363,20 @@ class AMHSExecutor:
         self.delivery_samples: List[float] = []
         self.transport_samples: List[float] = []
         self.total_transitions = 0
-        self.total_repositions = 0       # F10 — number of reposition moves performed
+        self.total_repositions = 0       # number of reposition moves performed
         self.max_queue = 0
         self.max_node_inflight = 0   # name kept for external compatibility (actually max section_inflight)
         self.total_busy_oht_time = 0.0
         self.last_event_time = 0.0
 
-        # F12 — KPI time series (only when record_trajectory=True)
+        # KPI time series (only when record_trajectory=True)
         # cumulative completed transports (delivered lot transports)
         self._delivered_count = 0
         # snapshot list: (sim_time, busy_count, sum_section_inflight,
         #                  pending_queue, delivered, max_section_inflight)
         self.kpi_snapshots: List[Tuple[float, int, int, int, int, int]] = []
 
-        # F17 — Custom strategy plugin hooks. None means the built-in is used.
+        # Custom strategy plugin hooks. None means the built-in is used.
         #   custom_assignment.select(target_sec, idle_ohts, rm, bridge) -> oht_name|None
         #   custom_idle.plan_reposition(oht, t, rm, bridge) -> next_section_id|None
         #   custom_routing.get_route(a, b, rm, bridge) -> List[node]
@@ -463,7 +463,7 @@ class AMHSExecutor:
         if a == b:
             return [], [], []
         key = (a, b)
-        # F17 — with custom routing, bypass the cache (lets congestion changes be reflected every time)
+        # With custom routing, bypass the cache (lets congestion changes be reflected every time)
         if self.custom_routing is not None:
             try:
                 result = invoke_node_routing_strategy(
@@ -520,7 +520,7 @@ class AMHSExecutor:
         if not self.idle:
             return None
         target_sec = self.bridge.get_section_for_node(job.from_node)
-        # F17 — custom assignment takes precedence when present
+        # Custom assignment takes precedence when present
         if self.custom_assignment is not None and target_sec is not None:
             idle_dict = {o.name: o for o in self.idle}
             try:
@@ -659,7 +659,7 @@ class AMHSExecutor:
             self._section_vehicles[sec].add(oht_name)
         if c > self.max_node_inflight:
             self.max_node_inflight = c
-        # P0-1 — always synchronise the shared bridge congestion counter.
+        # Always synchronise the shared bridge congestion counter.
         # CongestionAwareStrategy (the strategy used by route.Dispatcher) reads
         # bridge.get_section_congestion(), so the actual in-flight occupancy must be
         # reflected even with routing_model='off' — otherwise '--strategy congestion'
@@ -667,7 +667,7 @@ class AMHSExecutor:
         # node.traffic_penalty is updated only when dynamic (preserves static-routing semantics).
         self.bridge.on_oht_enter_section(
             sec, update_penalty=(self.routing_model == 'dynamic'))
-        # F11 — cache invalidation under dynamic routing
+        # Cache invalidation under dynamic routing
         self._on_enter_section_dynamic(sec)
 
     def _remove_inflight(self, sec: int, now: Optional[float] = None,
@@ -677,10 +677,10 @@ class AMHSExecutor:
             self.section_inflight[sec] = c - 1
         if self.congestion_model == 'queue' and oht_name is not None:
             self._section_vehicles[sec].discard(oht_name)
-        # P0-1 — always synchronise the bridge congestion counter (see _add_inflight above)
+        # Always synchronise the bridge congestion counter (see _add_inflight above)
         self.bridge.on_oht_leave_section(
             sec, update_penalty=(self.routing_model == 'dynamic'))
-        # F11 — cache invalidation under dynamic routing
+        # Cache invalidation under dynamic routing
         self._on_leave_section_dynamic(sec)
         # 'queue' — space freed up, so wake the head of this section's entry queue.
         if self.congestion_model == 'queue' and now is not None:
@@ -700,7 +700,7 @@ class AMHSExecutor:
             return 1.0 + self.congestion_alpha * tip_ratio
         return 1.0
 
-    # F12 — KPI snapshot interval (in transition counts)
+    # KPI snapshot interval (in transition counts)
     _KPI_SNAPSHOT_EVERY = 200
 
     def _snapshot_kpi(self, t: float):
@@ -742,7 +742,7 @@ class AMHSExecutor:
                 return
 
         self.total_transitions += 1
-        # F12 — periodic KPI snapshot (only when record_trajectory is ON)
+        # Periodic KPI snapshot (only when record_trajectory is ON)
         if (self.record_trajectory
                 and self.total_transitions % self._KPI_SNAPSHOT_EVERY == 0):
             self._snapshot_kpi(t)
@@ -825,7 +825,7 @@ class AMHSExecutor:
                 'congestion': (job.dur / job.free_flow) if job.free_flow else 1.0,
             })
 
-        # F12 — increment the delivered count (excluding repositions)
+        # Increment the delivered count (excluding repositions)
         if job.lot is not None:
             self._delivered_count += 1
 
@@ -848,7 +848,7 @@ class AMHSExecutor:
         else:
             self.idle.append(oht)
 
-    # ── F17: Custom strategy plugin registration ─────────
+    # ── Custom strategy plugin registration ─────────
     def set_custom_strategies(self, *,
                               assignment=None, idle_positioning=None,
                               routing=None):
@@ -870,7 +870,7 @@ class AMHSExecutor:
             self._route_cache.clear()
             self.bridge.clear_route_cost_cache()
 
-    # ── F11: dynamic routing — traffic_penalty update + cache invalidation ──
+    # ── Dynamic routing — traffic_penalty update + cache invalidation ──
     def _on_enter_section_dynamic(self, sec: int):
         """Only when routing_model='dynamic' — invalidate the routing caches.
 
@@ -1008,7 +1008,7 @@ class AMHSExecutor:
         self.deadlock_forced += 1
         self.on_section_enter(self.instance, oht, job, next_idx, t, force=True)
 
-    # ── F10: Idle vehicle positioning ─────────────────────
+    # ── Idle vehicle positioning ─────────────────────
     def _build_adjacency(self):
         """section_id → list of adjacent section_ids, inferred from the graph edges of the nodes in each section."""
         self.adjacency.clear()
@@ -1082,7 +1082,7 @@ class AMHSExecutor:
     def _start_reposition(self, oht: OHT, now: float) -> bool:
         """Move the OHT 1 hop to an adjacent sparse section (True on success)."""
         cur = oht.current_section_id
-        # F17 — custom idle_positioning takes precedence
+        # Custom idle_positioning takes precedence
         best_sec: Optional[int] = None
         if self.custom_idle is not None:
             try:

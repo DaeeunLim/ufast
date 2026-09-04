@@ -212,7 +212,7 @@ def show_run(
     elapsed = time.time() - started
     print(f"[viz.rerun_replay] Replay logging complete — {frame:,} frames, {elapsed:.1f}s")
 
-    # ── F12: KPI time-series scalar plot ──
+    # ── KPI time-series scalar plot ──
     # snapshot: (sim_time, busy_count, inflight_sum, pending, delivered, max_inflight)
     snapshots = traj.kpi_snapshots
     if snapshots:

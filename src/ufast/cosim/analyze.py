@@ -3,8 +3,9 @@ analyze.py — read ufast result JSONs and print the KPIs plus a comparison agai
 the LogiFabSim paper.
 
 Usage:
-  python3 ufast/cosim/analyze.py <result.json> [<result.json> ...]
-  python3 ufast/cosim/analyze.py                  # newest one under results/ automatically
+  ufast-analyze <result.json> [<result.json> ...]
+  ufast-analyze                                   # newest one under results/ automatically
+  (or: python3 -m ufast.cosim.analyze ...)
 """
 from __future__ import annotations
 import glob

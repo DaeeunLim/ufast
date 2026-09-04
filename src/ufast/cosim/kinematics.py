@@ -1,8 +1,8 @@
 """
 kinematics.py — OHT acceleration/deceleration kinematics travel-time model.
 
-Reimplements the edge transport-time model of LogiFabSim (Rank & Betker, 2025 IFAC)
-(reimplemented following Rank & Betker, 2025). Each edge is modelled as a
+Reimplements the edge transport-time model of LogiFabSim (Rank & Betker, IFAC 2025).
+Each edge is modelled as a
 trapezoidal speed profile of accelerate → cruise → decelerate, and at an edge
 boundary the speed carries over into the next edge's speed limit (LogiFabSim
 simplification). A path starts and ends at rest (speed 0).

@@ -34,7 +34,7 @@ from ufast.integration.timeline import Snapshot, TimelineRecorder
 
 
 # The greedy decision functions are reused from the same production engine as the CLI co-sim.
-# (Phase 2: dependency on the simulation/ copy removed — single engine)
+# (dependency on the simulation/ copy removed — single engine)
 from ufast.production.greedy import (
     get_lots_to_dispatch_by_machine,
     get_lots_to_dispatch_by_lot,

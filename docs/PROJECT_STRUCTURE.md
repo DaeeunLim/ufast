@@ -20,7 +20,7 @@ repo/
 ├── scripts/             # experiment and operations scripts
 ├── tests/               # pytest suite
 ├── docs/                # user documentation (CLI guide, AMHS modes, structure)
-├── external/            # vendored baseline simulators (PySCFabSim, LogiFabSim)
+├── external/            # (optional, not bundled) baseline simulator checkouts (PySCFabSim, LogiFabSim)
 └── src/
     ├── ufast/           # ★ distributed package (details below)
 ```

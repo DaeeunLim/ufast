@@ -220,7 +220,7 @@ def run_legacy_fromto(
     # ── Unified results / analyze ──
     results = collect_fromto_results(meta, vc, ds, trajectory_data)
     out_path = save_results(results, auto_result_path(DEFAULT_RESULTS_DIR, meta))
-    # F16 — fromto mode can only export the trip CSV (kpi/lots/machines are production-only)
+    # Fromto mode can only export the trip CSV (kpi/lots/machines are production-only)
     if recorder is not None and recorder.trips:
         csv_paths = save_csv_exports(out_path, trip_log=recorder.trips)
         if verbose and csv_paths:

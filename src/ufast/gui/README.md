@@ -24,4 +24,4 @@ The package holding the **screen components (widgets, docks, dialogs)** of the U
 
 ## Dependencies
 
-Internal: `core.data_set`, `core.geometry`, `core.components`, `integration.production_view` (try/except), `common.config_loader`, `common.logger`. Third-party: PyQt6.
+Internal: `core.data_set`, `drawing.geometry`, `core.components`, `integration.production_view` (try/except), `common.config_loader`, `common.logger`. Third-party: PyQt6.

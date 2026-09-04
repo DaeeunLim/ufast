@@ -22,5 +22,5 @@ A collection of utilities reused throughout U-FAST. It covers layout/logistics i
 
 - `main_ui.py`: uses all parsers + logger + strategy_loader.
 - The production core (`production/instance.py`, `events.py`) and `integration/production_runner.py`: call `equipment_kpi`.
-- `control/controllers.py`, `ufast/amhs.py`: inject custom strategies via `strategy_loader`.
+- `control/controllers.py`, `cosim/amhs.py`: inject custom strategies via `strategy_loader`.
 - The KPI tests under `tests/` unit-test these modules directly.
