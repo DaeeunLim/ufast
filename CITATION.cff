@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use U-FAST, please cite the software and the SoftwareX paper (in submission)."
+title: "U-FAST: Unified Fab-AMHS Simulation Toolkit"
+version: 1.0.0
+date-released: 2026-09-04
+license: MIT
+repository-code: "https://github.com/DaeeunLim/ufast"
+authors:
+  - family-names: Lim
+    given-names: Dae-Eun
+    affiliation: Kangwon National University
+  - family-names: Lee
+    given-names: Ju-Yong
+    affiliation: Kangwon National University
+  - family-names: Lee
+    given-names: Sang Soo
+    affiliation: Korea University
+  - family-names: Park
+    given-names: Ju Won
+    affiliation: Korea University
+  - family-names: Song
+    given-names: Byung Duk
+    affiliation: Korea University
+keywords:
+  - semiconductor manufacturing
+  - discrete-event simulation
+  - automated material handling system
+  - co-simulation

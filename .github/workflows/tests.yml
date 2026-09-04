@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Run tests
+        run: python -m pytest tests -q
+      - name: Zero-day co-simulation smoke run
+        run: ufast-run dataset/HVLM dataset/SMAT2022.rail --days 0 --oht 5
+      - name: Logistics-only smoke run (blocking engine)
+        run: ufast-fromto dataset/case1.rail dataset/case1_Fromto.dat --oht 10 --duration 3600

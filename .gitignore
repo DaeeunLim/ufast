@@ -1,0 +1,47 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Personal remote-server config (see scripts/remote_config.example.sh)
+scripts/remote_config.sh
+
+# Node.js
+node_modules/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Simulation outputs (generated at runtime)
+results/
+src/results/
+src/logs/
+.claude/
+
+# Java
+target/
+*.class
+
+.venv/
+external/
+.aider*
+paper/
+logs/
+*.egg-info/
+strategies/*
+!strategies/README.md

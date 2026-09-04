@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ufast"
+version = "1.0.0"
+description = "U-FAST (Unified Fab-AMHS Simulation Toolkit) — co-simulation of semiconductor fab production and AMHS logistics"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",            # fast_pathfinder C 다익스트라 가속
+    "python-dateutil",
+    "pytz",
+    "six",
+    "tzdata",
+    "joblib",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+gui = ["PyQt6"]
+viz = ["rerun-sdk", "matplotlib", "pyarrow"]  # --viz 재생·리포트·Replay 기록
+
+[project.scripts]
+ufast-run = "ufast.cosim.run:main"
+ufast-fromto = "ufast.cosim.run_fromto:main"
+ufast-analyze = "ufast.cosim.analyze:main"
+ufast-aggregate = "ufast.cosim.aggregate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ufast*"]

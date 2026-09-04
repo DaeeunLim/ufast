@@ -1,0 +1,10 @@
+{
+  "_comment": "Default OHT vehicle specification used by ufast-run and ufast-fromto. Units: mm, mm/s, mm/s^2. Values = SMAT2022 OHTV0 (dataset/SMAT2022/VehicleType.csv) plus the rail speed limits. Override per run with --vehicle-spec PATH or the --oht-*/--line-speed/--curve-speed flags.",
+  "length_mm": 784,
+  "headway_mm": 125,
+  "max_speed_mm_s": 5000,
+  "accel_mm_s2": 2000,
+  "decel_mm_s2": 3500,
+  "line_speed_mm_s": 5000,
+  "curve_speed_mm_s": 1000
+}
