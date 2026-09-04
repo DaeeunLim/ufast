@@ -1,25 +1,19 @@
-# ── Integrated simulator dependencies ──────────────────────────
-# Shared by logistics (main_ui) + production (LogiFabSim)
+# Runtime dependencies, mirroring the [project] dependencies in pyproject.toml.
+#
+# The recommended install is  pip install -e .  which reads pyproject.toml and
+# also registers the ufast-run / ufast-fromto / ufast-analyze / ufast-aggregate
+# commands. This file is kept for environments that prefer a requirements file.
+#
+# Optional extras (not listed here):
+#   pip install -e ".[viz]"   Rerun replay, charts, HTML report
+#   pip install -e ".[gui]"   PyQt6 desktop GUI
 
-# GUI (logistics simulator + integrated UI)
-PyQt6
-
-# Production simulator (LogiFabSim / PySCFabSim)
 numpy
 pandas
-sortedcontainers
+scipy            # C Dijkstra acceleration for fast_pathfinder
 python-dateutil
 pytz
 six
 tzdata
-
-# Batch experiments / parallel execution (optional) — keeps the original LogiFabSim main.py features
 joblib
 tqdm
-
-# Note:
-# - cffi / greenlet / hpy are only needed when using the PyPy interpreter;
-#   they do not need to be installed in a regular CPython environment.
-
-# C-accelerated path search (fast_pathfinder)
-scipy

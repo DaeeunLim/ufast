@@ -165,4 +165,4 @@ notices section of LICENSE.txt.
 
 ## Contact
 
-Daeeun Lim — daeeun.lim@gmail.com
+Dae-Eun Lim — del@kangwon.ac.kr

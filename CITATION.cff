@@ -5,9 +5,14 @@ version: 1.0.0
 date-released: 2026-09-04
 license: MIT
 repository-code: "https://github.com/DaeeunLim/ufast"
+contact:
+  - family-names: Lim
+    given-names: Dae-Eun
+    email: del@kangwon.ac.kr
 authors:
   - family-names: Lim
     given-names: Dae-Eun
+    email: del@kangwon.ac.kr
     affiliation: Kangwon National University
   - family-names: Lee
     given-names: Ju-Yong

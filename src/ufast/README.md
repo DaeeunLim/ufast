@@ -16,8 +16,7 @@ Both paths use **the same production engine (`production/`, a PySCFabSim fork)**
 ## 1. Running the GUI
 
 ```bash
-pip install -r requirements.txt
-pip install -e .          # or PYTHONPATH=src
+pip install -e ".[gui]"    # core + PyQt6; or PYTHONPATH=src
 python3 -m ufast.main_ui   # from the repository root
 ```
 
