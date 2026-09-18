@@ -109,10 +109,11 @@ repositioning, dynamic routing, custom strategy plugins),
 
 ```
 pyproject.toml        package definition (src-layout)
-dataset/              SMT2020 production datasets (HVLM/LVHM/LVLM) + SMAT2022 rail layout
+dataset/              SMT2020 production datasets (HVLM/LVHM/LVLM) + SMAT2022 rail layout + vehicle spec
+docs/                 user documentation (CLI guide, output file specification, project structure)
 examples/             custom strategy plugin examples (templates for the four slots)
 strategies/           your own strategy files (.py/.pkl) — found by bare name
-scripts/              experiment batches, baseline benchmark, remote-run helpers
+scripts/              experiment batches, baseline benchmark, heatmap figures, engine check
 tests/                pytest suite (incl. zero-day co-simulation smoke test)
 results/, logs/       run outputs (generated, git-ignored)
 src/ufast/            the Python package
@@ -124,7 +125,9 @@ src/ufast/            the Python package
 └── gui/, core/, drawing/, control/, layout/, integration/, verification/   GUI stack
 ```
 
-Run the test suite with `python -m pytest tests/`.
+Run the test suite with `python -m pytest tests/`. A folder-by-folder overview is in
+[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md); every subpackage under `src/ufast/` and
+every top-level folder also carries its own README.
 
 ## Provenance and citations
 

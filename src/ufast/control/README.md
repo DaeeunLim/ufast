@@ -2,7 +2,7 @@
 
 ## Role
 
-The **brain** of the AMHS logistics simulation (GUI/legacy mode), a single-module package (`controllers.py`, about 1,480 lines). It consists of two classes: `VehicleController`, responsible for OHT creation, initial distributed placement, assignment and route search; and `EventHandler`, which processes discrete events (LOT/TRANSFER_EXT/PROCESS_END), advances vehicles section by section and updates EQ states. It has a three-tier structure: custom strategy (.py plugin) injection → delegation to the `route` package → its own Dijkstra fallback.
+The **brain** of the AMHS logistics simulation (GUI/legacy mode), a single-module package (`controllers.py`). It consists of two classes: `VehicleController`, responsible for OHT creation, initial distributed placement, assignment and route search; and `EventHandler`, which processes discrete events (LOT/TRANSFER_EXT/PROCESS_END), advances vehicles section by section and updates EQ states. It has a three-tier structure: custom strategy (.py plugin) injection → delegation to the `route` package → its own Dijkstra fallback.
 
 ## Main components
 

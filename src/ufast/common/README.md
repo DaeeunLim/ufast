@@ -2,7 +2,7 @@
 
 ## Role
 
-A collection of utilities reused throughout U-FAST. It covers layout/logistics input file parsers (.dxf, .rail, FromTo), simulation KPI collection and CSV logging, dynamic loading of custom strategy plugins, and post-run verification reports. Both the simulation core (`production`, `ufast`, `control`) and the GUI depend on this folder.
+A collection of utilities reused throughout U-FAST. It covers layout/logistics input file parsers (.dxf, .rail, FromTo), simulation KPI collection and CSV logging, dynamic loading of custom strategy plugins, and the input consistency check run before every simulation. Both the simulation core (`production`, `cosim`, `control`) and the GUI depend on this folder.
 
 ## Files
 
@@ -16,10 +16,12 @@ A collection of utilities reused throughout U-FAST. It covers layout/logistics i
 | `smat2022_to_rail.py` | `convert(smat_dir, out_rail, out_map)` | SMAT2022 CSV (`Adress/Rail/Equipment.csv`) → U-FAST `.rail` converter. Remaps node names to integer IDs, merges junction-to-junction sections, picks a representative node per tool group + mapping report |
 | `dxf_parser.py` | `DXFParser.parse` | AutoCAD DXF → converts LINE/ARC/CIRCLE/TEXT/BLOCK into `CLayer` geometry |
 | `fromto_parser.py` | `load_fromto(filepath)`, `generate_fixed_interval_events()` | Tab-separated FromTo file → list of `(from_eq, to_eq, rate)` and fixed-interval (3600/rate s) event generation |
-| `config_loader.py` | `ConfigLoader` (singleton) | Loads viewer appearance settings (colors, line widths) from `config/settings.json`, falling back to built-in defaults |
+| `consistency.py` | `check_fromto`, `check_production_families`, `ConsistencyReport`, `ConsistencyError` | Input consistency check — FromTo equipment names ↔ `.rail` EQ list, dataset tool families ↔ rail destinations. Prints a `consistency[...]` summary; raises in `--strict` mode |
+| `config_loader.py` | `ConfigLoader` (singleton) | Loads viewer appearance settings (colors, line widths) from an optional `config/settings.json` (not shipped), falling back to built-in defaults |
 
 ## Usage context
 
+- `cosim/run.py`, `cosim/run_fromto.py`: `consistency`, `strategy_loader`, `equipment_kpi`, `fromto_parser`.
 - `main_ui.py`: uses all parsers + logger + strategy_loader.
 - The production core (`production/instance.py`, `events.py`) and `integration/production_runner.py`: call `equipment_kpi`.
 - `control/controllers.py`, `cosim/amhs.py`: inject custom strategies via `strategy_loader`.

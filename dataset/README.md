@@ -4,8 +4,8 @@
 
 Input data store for the simulation. On the production side there are three SMT2020-family fab
 datasets (HVLM/LVHM/LVLM); on the logistics side, the SMAT2022 AMHS layout CSVs and the `.rail` file
-converted from them. The large From-To trace (`.dat`) used by the legacy logistics-only runner and
-the conversion outputs are also kept here.
+converted from them. The From-To demand table (`.dat`) used by the logistics-only runner
+(`ufast-fromto`), the default OHT vehicle specification and the conversion outputs are also kept here.
 
 ## Production datasets (SMT2020 family)
 
@@ -24,20 +24,21 @@ Common file layout (tab-separated text):
 | `part.txt` / `order.txt` / `WIP.txt` | Product→route mapping / release plan / initial WIP |
 | `downcal.txt` / `pmcal.txt` / `attach.txt` | Breakdown and PM calendars and their attachment to tool groups |
 | `setup.txt` / `setupgrp.txt` | Setup change matrix / group definitions |
-| `fromto.txt` | Static transport-time distribution bundled with the dataset — baseline when the AMHS is not used |
+| `fromto.txt` | Static transport-time distribution bundled with the dataset — used during the static warm-up period and by the production-only baselines |
 
 ## Rail layouts (.rail)
 
 | File | Role |
 |---|---|
 | `SMAT2022.rail` | **Primary layout** — generated from the SMAT2022 CSVs by `smat2022_to_rail.convert()` (2,858 nodes / 3,424 links / 1,698 sections) |
-| `case1.rail` | Original small case1 layout (legacy format) |
+| `case1.rail` | Small demonstration layout — default input of `ufast-fromto` and the CI logistics smoke run |
 | `case1_SMT2020_106_nospur.rail` | case1-based mapping of the 106 SMT2020 tools with spurs removed |
 
 ## SMAT2022/ original sources
 
 `Adress.csv` (2,857 nodes) · `Rail.csv` (3,423 links) · `Equipment.csv` (1,115 tools) ·
-`VehicleType.csv` (OHT specification: Vmax 5000, accel 2000, decel 3500 mm/s) ·
+`Rail_ext.csv` (links with lengths, from `add_lengths.py`) · `Port.csv` (equipment ports) ·
+`VehicleType.csv` (OHT specification: Vmax 5000 mm/s, accel 2000 / decel 3500 mm/s²) ·
 `transport_times_between_tool_groups.csv` (precomputed transport times between tool groups) ·
 three computation scripts (`add_lengths.py`, `calc_transport_times.py`,
 `calc_mean_transport_times_between_families.py`)
@@ -45,8 +46,7 @@ three computation scripts (`add_lengths.py`, `calc_transport_times.py`,
 ## Other
 
 - `case1_Fromto.dat` (1.27M rows) — From-To hourly rate (rate [events/hour]) time series for the
-  logistics-only mode (read by `common/fromto_parser`). The large-fab extension example (LVHM_E) is
-  not included in the public repository because of its size.
+  logistics-only mode (read by `common/fromto_parser`; default input of `ufast-fromto`)
 - `SMAT2022_family_node_map.csv` — conversion output: representative rail node for each of the 108
   tool groups
 
@@ -66,7 +66,19 @@ ufast-run dataset/HVLM dataset/SMAT2022.rail --days 365 --oht 100
 ```
 
 The default dataset list of `scripts/compare_baselines.py` is the three sets HVLM/LVHM/LVLM, and
-`tests/test_cosim_smoke.py` and `scripts/verify_fast_route.py` also use this folder as input.
-SMT2020/SMAT2022 are externally published datasets, so when releasing the code it is safer to
-provide "download the original → run the converter" instructions instead of redistributing the
-originals.
+`tests/test_ufast_smoke.py`, `tests/test_fromto.py` and `scripts/verify_fast_route.py` also use this
+folder as input.
+
+## Provenance
+
+- SMT2020 datasets: D. Kopp, M. Hassoun, A. Kalir, L. Mönch, *SMT2020 — A Semiconductor
+  Manufacturing Testbed*, IEEE Trans. Semiconductor Manufacturing, 2020.
+- SMAT2022 layout (rail network, equipment coordinates, vehicle type): as distributed with
+  LogiFabSim (S. Rank, V. Betker, IFAC-PapersOnLine, 2025).
+
+See [NOTICE.txt](../NOTICE.txt) for the attributions. `SMAT2022.rail` and
+`SMAT2022_family_node_map.csv` can be regenerated from the CSVs:
+
+```bash
+python -c "from ufast.common.smat2022_to_rail import convert; convert('dataset/SMAT2022', 'dataset/SMAT2022.rail', 'dataset/SMAT2022_family_node_map.csv')"
+```

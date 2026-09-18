@@ -69,7 +69,7 @@ The same Dijkstra as PathSearch, but it keeps searching until every destination 
 
 ### 3. C acceleration engine (fast_pathfinder.FastCostEngine)
 
-Accelerates `cost_search`, which accounted for most of the co-sim run time, with `scipy.sparse.csgraph.dijkstra` (C implementation). For a 1-day HVLM co-sim the total run time dropped from 97 s to 15.5 s.
+Accelerates `cost_search`, which accounted for most of the co-sim run time, with `scipy.sparse.csgraph.dijkstra` (C implementation). For a 1-day HVLM co-sim on one workstation the total run time dropped from about 97 s to about 15 s.
 
 - The rail topology is immutable, so the section chains are expanded into a CSR sparse matrix **only once**.
 - The edge weight is `move_time × effective_penalty(destination node penalty)`, identical to the existing cost formula; when a penalty changes because an OHT enters/leaves, only the edges entering the affected node are updated in place (bridge hook → `notify_penalty_changed`).
@@ -150,7 +150,7 @@ stats = rm.get_detour_stats()
 
 ### 5. Deadlock detection (VehicleTracker)
 
-Builds a **wait-for graph** and detects cycles. (GUI mode only — the co-sim CLI uses a delay-based congestion model and therefore needs no node occupancy tracking.)
+Builds a **wait-for graph** and detects cycles. (Used by the GUI/legacy engine, which tracks node occupancy here. The co-sim CLI's `queue` model keeps its own section-level wait-for graph in `ufast/cosim/amhs.py`.)
 
 ```
 wait-for relation:
@@ -205,7 +205,7 @@ A tab-separated text file. The first line is the `RAILDATA` header.
 ### Basic usage
 
 ```python
-from route import RouteManager
+from ufast.route import RouteManager
 
 rm = RouteManager()
 rm.load_from_rail("layout.rail")
