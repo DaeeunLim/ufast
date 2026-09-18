@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use U-FAST, please cite the software and the SoftwareX paper (in submission)."
 title: "U-FAST: Unified Fab-AMHS Simulation Toolkit"
 version: 1.0.0
-date-released: 2026-09-04
+date-released: 2026-09-18
 license: MIT
 repository-code: "https://github.com/DaeeunLim/ufast"
 contact:
