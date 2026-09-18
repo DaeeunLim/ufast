@@ -2,7 +2,7 @@
 
 ## Role
 
-The lowest layer, holding only the **CAD figure dataclasses** of the drawing (DXF/.rail) world. It represents lines, circles, text, quadratic Bezier curves, and layers; the parsers (`common/dxf_parser`, `common/rail_io`) create these figures, and the layout conversion (`layout/rail_manager`) and GUI rendering (`gui/viewer`) consume them. It was originally `src/ufast/core/geometry.py` but was moved into a separate package to separate the simulation entities (`core`) from the drawing representation (2026-08-05).
+The lowest layer, holding only the **CAD figure dataclasses** of the drawing (DXF/.rail) world. It represents lines, circles, text, quadratic Bezier curves, and layers; the parsers (`common/dxf_parser`, `common/rail_io`) create these figures, and the layout conversion (`layout/rail_manager`) and GUI rendering (`gui/viewer`) consume them. It is kept separate from the simulation entities (`core`) so that parsers and renderers do not depend on simulation code.
 
 > Regular package (`__init__.py` present).
 

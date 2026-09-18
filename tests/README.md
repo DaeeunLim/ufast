@@ -2,7 +2,7 @@
 
 ## Role
 
-A lightweight regression test suite (48 cases, about 2 seconds) that protects the core KPI
+A lightweight regression test suite (49 cases, a few seconds) that protects the core KPI
 calculations, the result-saving conventions, the input parsers and the behaviour of the queue
 (blocking) model. Instead of heavy simulations it is designed to run quickly with
 `SimpleNamespace` dummy objects and zero-day smoke runs.

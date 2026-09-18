@@ -4,7 +4,8 @@ This document is a detailed guide to running the U-FAST semiconductor co-simulat
 CLI (Command Line Interface) mode and to its main options.
 
 U-FAST is a co-simulation engine that couples a production simulator (PySCFabSim) with a physical
-logistics simulator (AMHS). It provides the following three main CLI scripts.
+logistics simulator (AMHS). It provides the following three main CLI scripts, plus the two
+post-processing commands `ufast-analyze` and `ufast-aggregate` (see [output_files.md](output_files.md)).
 
 1. **Integrated co-simulation runner (`python -m ufast.cosim.run` / `ufast-run`):** runs a coupled
    production + logistics (AMHS) simulation on a single production dataset and rail layout and
@@ -43,12 +44,12 @@ PYTHONPATH=src python -m ufast.cosim.run [dataset_dir] [rail_file] [options]
 | `--oht` | `int` | positive integer | `200` | **Number of OHT vehicles in the AMHS** (fleet size). Too few vehicles create a logistics bottleneck; too many sharply increase rail congestion. |
 | `--seed` | `int` | integer | `0` | **Random seed**. Ensures reproducibility so that the same conditions always produce the same simulation result. |
 | `--alpha` | `float` | `0.0` ~ `1.0` | `0.05` | **Congestion weight ($\alpha$)**. Penalty coefficient added to the edge weight per vehicle ahead during congestion-aware shortest-path search. |
-| `--dispatcher` | `str` | `fifo`<br>`cr`<br>`random` | `fifo` | **Production dispatching rule**. Decision rule that picks the next lot to process from a tool queue.<br>• `fifo`: first-in first-out<br>• `cr`: Critical Ratio (urgency first)<br>• `edd`: Earliest Due Date<br>• `setup_avoidance`: minimises setup changes |
-| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `fifo` | **AMHS OHT assignment strategy**. Decides how idle OHTs are matched to lots that issued a loading request.<br>• `fifo`: match in request order<br>• `nearest`: prefer the closest vehicle |
+| `--dispatcher` | `str` | `fifo`<br>`cr`<br>`random` | `fifo` | **Production dispatching rule**. Decision rule that picks the next lot to process from a tool queue.<br>• `fifo`: first-in first-out<br>• `cr`: Critical Ratio (urgency first)<br>• `random`: random order (baseline) |
+| `--strategy` | `str` | `fifo`<br>`nearest`<br>`same_section`<br>`congestion` | `fifo` | **AMHS OHT assignment strategy**. Decides how idle OHTs are matched to lots that issued a loading request.<br>• `fifo`: match in request order<br>• `nearest`: idle vehicle in the pickup section first, otherwise the lowest route cost<br>• `same_section`: idle vehicle in the pickup section first, otherwise any idle vehicle<br>• `congestion`: route cost plus a weighted congestion score of the sections along the route |
 | `--congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | **Logistics congestion model**.<br>• `queue` (**default**): **capacity-constrained blocking model** — each section has a finite number of FIFO slots (⌊section length / vehicle footprint⌋); entry into a full section is blocked and the vehicle waits. Deadlocks are resolved by wait-for cycle detection followed by forced entry, and the `blocked_events`/`blocked_time_s`/`deadlock_forced` metrics are added to the result (α unused).<br>• `section_local`: delay-based alternative — when several OHTs travel in the same section the travel time is inflated in proportion to occupancy (uses α).<br>• `global_tip`: LogiFabSim-style global TIP-proportional slowdown (reproduced for comparison).<br>• `off`: no congestion (free-flow). |
-| `--idle` | `str` | `off`<br>`on` | `off` | **Idle OHT repositioning strategy**.<br>• `off`: idle vehicles wait at their destination<br>• `reposition`: idle vehicles are moved in advance to areas where demand is expected to be high. |
-| `--routing` | `str` | `off`<br>`dynamic` | `off` | **OHT route search mode**.<br>• `off` / `static`: drive along the static shortest (free-flow) route<br>• `dynamic`: dynamic Dijkstra re-routing that reflects real-time rail congestion (including the α penalty) |
-| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | **Candidate matching mode for the next processing tool**.<br>• `exact` (default): computes a precise physical Dijkstra logistics route for the top 8 candidate tools and selects the one reachable in the shortest time.<br>• `nearest` (recommended): approximates the selection with the Euclidean (straight-line) distance instead of a physical route search. **(Cuts computation time by roughly 5x or more.)** |
+| `--idle` | `str` | `off`<br>`on` | `off` | **Idle OHT repositioning strategy**.<br>• `off`: idle vehicles wait at their destination<br>• `on`: idle vehicles are moved in advance to areas where demand is expected to be high. |
+| `--routing` | `str` | `off`<br>`dynamic` | `off` | **OHT route search mode**.<br>• `off`: drive along the static shortest (free-flow) route<br>• `dynamic`: dynamic Dijkstra re-routing that reflects real-time rail congestion (including the α penalty) |
+| `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | **Candidate matching mode for the next processing tool**.<br>• `exact` (default): computes a precise physical Dijkstra logistics route for the top 8 candidate tools and selects the one reachable in the shortest time.<br>• `nearest`: approximates the selection with the Euclidean (straight-line) distance instead of a physical route search — much faster; the transport itself is still simulated physically. |
 | `--static-warmup-days` | `float` | positive real | `0.0` | **Static warm-up days**. During the initial backlog and warm-up period the physical AMHS model is skipped and a static transport-time constant is applied, so the heavily loaded warm-up phase passes almost instantly. |
 | `--amhs-settling-days` | `float` | positive real | `0.0` | **AMHS adaptation/settling days**. Grace period after the static warm-up and before statistics collection starts, during which the real AMHS (OHT driving) runs so that the logistics flow settles. |
 | `--custom-assignment` / `--custom-routing` / `--custom-idle` | `path` | `.py` / `.pkl` | none | **Custom strategy plugins** — replace the OHT assignment / routing / idle repositioning slot with a user file. Returning `None` falls back to the built-in rule. A bare file name is looked up in the `strategies/` folder. Conventions and examples: [strategies/README.md](../strategies/README.md), `examples/` |
@@ -102,9 +103,9 @@ options are appended only when they differ from the default: `_idleon`, `_rdyn` 
 | `transport` (logistics-only) | `lots_generated` (number of requests), `lots_completed`, `completion_rate`, `oht_count`, `oht_final_status` |
 
 `ufast-analyze [json]` reads this JSON and prints a console report (including a comparison with
-literature reference values). The raw values of the per-section **occupancy** heatmap
-(`*_sections.csv`) are not a runner output; they are produced by
-`scripts/make_queue_occupancy_heatmap.py`, which performs an instrumented run.
+literature reference values). Per-section occupancy and blocking heatmap figures are not runner
+outputs; they are produced by `scripts/make_queue_occupancy_heatmap.py` (instrumented run) and
+`scripts/make_queue_blocking_heatmap.py` (from `amhs.blocked_time_by_section` of a result JSON).
 
 ---
 
@@ -166,6 +167,10 @@ Experiment automation script that compares the results of PySCFabSim (production
 LogiFabSim (production + simple queueing logistics) and U-FAST (production + physical AMHS), and
 batch-produces 3-way KPI plots and a performance summary report.
 
+PySCFabSim and LogiFabSim are **not bundled** with U-FAST; see [scripts/README.md](../scripts/README.md)
+for where to place the checkouts (`external/`, or the `UFAST_PYSC_DIR` / `UFAST_LOGI_DIR`
+environment variables). U-FAST itself does not need them.
+
 ### Command structure
 ```bash
 python scripts/compare_baselines.py [options]
@@ -191,6 +196,7 @@ python scripts/compare_baselines.py [options]
 | `--static-warmup-days` | `float` | positive real | `0.0` | Static warm-up days passed to the U-FAST co-sim run. |
 | `--amhs-settling-days` | `float` | positive real | `0.0` | AMHS settling days passed to the U-FAST co-sim run. |
 | `--machine-selection` | `str` | `exact`<br>`nearest` | `exact` | Tool selection mode passed to the U-FAST co-sim run. |
+| `--ufast-congestion` | `str` | `queue`<br>`section_local`<br>`global_tip`<br>`off` | `queue` | Congestion model passed to the U-FAST co-sim run. |
 | `--mode` | `str` | `compare`<br>`sweep` | `compare` | **Operating mode**.<br>• `compare`: performs the 3-way KPI comparison and draws the performance tables and plots.<br>• `sweep`: runs the fleet-size sweep over the number of OHTs and produces the Logi CF overlay plot. |
 | `--oht-list` | `list` | list of integers | `[20, 30, 50, 100, 200]` | List of OHT fleet sizes to test with U-FAST in `sweep` mode. |
 
@@ -216,34 +222,17 @@ To avoid wasting simulation time, the following caching policy is therefore appl
 > U-FAST control strategies (`--machine-selection nearest` etc.), the baseline comparison plots can
 > be produced in about one second each time.
 
-> [!TIP]
-> **Recommended optimisation combination for practice and research (speed + physical fidelity):**
-> The most practical baseline combination that gives both **"speed and realistic physics"** for
-> industrial and research use is `--machine-selection exact` + `--routing off`. Tuning under this
-> combination yields excellent reliability and execution speed at the same time.
->
-> **💡 Routing options and how real-time congestion is reflected:**
-> In the U-FAST simulator, route selection and the physical driving simulation operate
-> independently. Therefore, even with `--routing off`, slowdown penalties caused by real-time
-> congestion are still applied normally.
-> * **1. What is reflected in real time (physical travel-time delay):**
->   With the `--congestion section_local` (default) model, every time an OHT passes through a rail
->   section, the real-time number of other OHTs travelling in that section is checked. If vehicles
->   ahead are backed up and there are 4 OHTs in the section, the speed is reduced according to the
->   traversal-time formula `Base time * (1 + alpha * 4)`, so **real-time congestion delay occurs
->   physically as expected**.
->   Thus even when tools are chosen with `exact`, the decision is based on "the accel/decel travel
->   time along the static shortest route to that tool", but once the vehicle departs, delay
->   accumulates in real time according to the situation on the rail.
-> * **2. What is not reflected (real-time detour re-routing around congestion):**
->   * `--routing off` (recommended): the vehicle always drives the fixed static shortest route from
->     origin to destination. Even with 10 vehicles backed up ahead it "does not detour and keeps
->     following that route" (though it suffers a large slowdown delay under rule 1). ➡️ *Closest to
->     real fab logistics control, and very fast to compute.*
->   * `--routing dynamic`: whenever the vehicle searches for a route it looks at the current rail
->     state and, if a section is jammed, takes a somewhat longer but clear detour — a fresh
->     congestion-aware Dijkstra search every time. This detour search is computationally very
->     expensive, so the run time grows dramatically.
+> [!NOTE]
+> **Congestion model vs. routing option.** Route selection and the physical driving simulation are
+> independent. With the default `--congestion queue`, section capacity and entry blocking are
+> enforced while the vehicle drives, whatever the routing option; with `--congestion section_local`
+> the traversal time of a section is inflated by `1 + alpha × (vehicles already in the section)`.
+> * `--routing off`: the vehicle always drives the static (free-flow) shortest route from origin to
+>   destination. Congestion still delays it physically, but it never detours. Fastest to compute.
+> * `--routing dynamic`: every route search is a congestion-aware Dijkstra on the current rail state
+>   (with the `alpha` penalty and detour limiting, see
+>   [src/ufast/route/ROUTE_MANAGER.md](../src/ufast/route/ROUTE_MANAGER.md)), so vehicles can detour
+>   around jammed sections. Noticeably slower because routes are recomputed per trip.
 
 ---
 
@@ -258,7 +247,7 @@ PYTHONPATH=src python -m ufast.cosim.run dataset/HVLM dataset/SMAT2022.rail --da
 
 ### ⚡ Scenario B: very fast U-FAST simulation (warm-up optimisation + nearest selection)
 Runs a 60-day long simulation while accelerating the warm-up phase with static time constants and
-combining it with nearest-distance tool selection, cutting the run time by roughly 80% or more.
+combining it with nearest-distance tool selection, which substantially reduces the run time.
 ```bash
 PYTHONPATH=src python -m ufast.cosim.run dataset/HVLM dataset/SMAT2022.rail --days 60 --static-warmup-days 50 --amhs-settling-days 5 --machine-selection nearest
 ```

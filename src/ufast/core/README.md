@@ -4,11 +4,9 @@
 
 The lowest layer, holding only the **domain data model** shared by the logistics simulator (GUI mode). It provides the simulation entities (OHT, EQ, Section, OHTBuffer) and a global singleton store containing the event queue. It has no PyQt dependency, so it is reused as is on the headless execution path (`ufast/cosim/run_legacy.py`).
 
-The `Section`/`OHTBuffer` here form the basis of the GUI mode's **capacity-constrained queue-based logistics model** (finite-slot buffers, entry blocking, FIFO). See the delay-based model used by the co-sim CLI (`ufast/cosim/amhs.py`) for the differences.
+The `Section`/`OHTBuffer` here form the basis of the GUI mode's **capacity-constrained queue-based logistics model** (finite-slot buffers, entry blocking, FIFO). The co-sim CLI (`ufast/cosim/amhs.py`) implements its own section queue model on the same idea (finite FIFO slots per section) with deadlock resolution, plus the delay-based alternatives.
 
-> The CAD shape dataclasses (`CLine`, `CCircle`, `CText`, etc.) were moved to `src/ufast/drawing/geometry.py` (2026-08-05). Only simulation entities remain in `core`.
->
-> No `__init__.py` (implicit namespace package).
+> The CAD shape dataclasses (`CLine`, `CCircle`, `CText`, etc.) live in `src/ufast/drawing/geometry.py`; only simulation entities are kept in `core`.
 
 ## Files
 

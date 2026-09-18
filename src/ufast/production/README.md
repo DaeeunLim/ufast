@@ -33,5 +33,5 @@
 
 - `src/ufast/common.equipment_kpi` — starvation/downtime instrumentation (added relative to upstream).
 - No third-party dependencies (standard library only).
-- Actual consumers are `src/ufast` (CLI) and `src/ufast/integration/production_runner.py` (GUI) — both use this package.
+- Actual consumers are `ufast.cosim` (CLI) and `src/ufast/integration/production_runner.py` (GUI) — both use this package.
 - Known leftover: the `--wandb`/`--chart` options of `greedy.run_greedy()` reference plugins that do not exist in this package and raise ImportError (standalone path only; unrelated to the integrated run path).

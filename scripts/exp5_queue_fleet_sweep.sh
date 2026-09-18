@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # E5 — fleet sweep with the queue (blocking) model (HVLM, queue-model version of paper Figure 3)
 #
-# Purpose (2026-08-09):
-#   1. SoftwareX repositioning — if the queue model is presented as the representative
-#      model, the validation and fleet-sweep figures must also come from queue-mode runs.
+# Purpose:
+#   1. Fleet-sweep figures with the queue (blocking) model, the representative model.
 #   2. Sanity check of forced deadlock resolution (deadlock_forced) in the saturated
-#      range (5-20 vehicles) — a prerequisite for switching the default model.
+#      range (5-20 vehicles).
 #
 #   HVLM: OHT {5,10,15,20,25,50,100,200,300} × seed{0,1,2} = 27 runs
 #   Same 180d design as E1/E3 (static 120d + settling 10d + measurement 50d).

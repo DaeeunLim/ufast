@@ -88,7 +88,7 @@ std, min, max).
 | `ufast-fromto --viz` | above + `_trips.csv`, `_kpi_timeseries.csv`, `_trajectories.json` |
 | `ufast-aggregate results/` | `results/aggregate/aggregate.json`, `aggregate.csv` |
 
-Note: the raw values of the per-section **occupancy** heatmap (`*_sections.csv`: `section_id,
-mean_occupancy_ohts, peak_occupancy_ohts, occupancy_integral_oht_s, section_capacity_ohts,
-blocked_time_s, blocked_events`) are not a runner output; they are produced by
-`scripts/make_queue_occupancy_heatmap.py`, which performs an instrumented run.
+Note: per-section occupancy and blocking heatmaps are figures, not runner outputs. They are produced
+by `scripts/make_queue_occupancy_heatmap.py` (instrumented run) and
+`scripts/make_queue_blocking_heatmap.py` (drawn from `amhs.blocked_time_by_section` of an existing
+result JSON).

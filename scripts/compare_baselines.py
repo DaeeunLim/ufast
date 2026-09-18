@@ -420,8 +420,8 @@ def run_fills(dataset: str, days: int, oht: int, dispatcher: str, seed: int,
     Regenerating per seed means changing --seed just works without a manual
     pre-run.  Uses fifo dispatcher / fifo AMHS strategy; the congestion
     variant is pinned explicitly so the filename matches load_fills
-    (default queue = the representative blocking model; to reproduce the pre-2026-08
-    E1 delay results use --ufast-congestion section_local).
+    (default queue = the representative blocking model; for the earlier delay-based
+    E1 results use --ufast-congestion section_local).
     """
     dataset_dir = f"dataset/{dataset}"
     rail_file = "dataset/SMAT2022.rail"
@@ -921,7 +921,7 @@ def main() -> int:
         "--ufast-congestion", default="queue",
         choices=["queue", "section_local", "global_tip", "off"],
         help="U-FAST congestion model (default queue = representative blocking model; "
-             "use section_local to reproduce the pre-2026-08 E1 delay results).",
+             "use section_local for the delay-based comparison).",
     )
     parser.add_argument(
         "--fills-source", default="run", choices=["run", "load"],

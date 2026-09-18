@@ -3,9 +3,8 @@
 ## Role
 
 Does not interfere with the simulation; generates a rule violation report from the
-state at the end of the run and the logger records. Separated into its own folder
-because its nature differs from the shared utilities (`src/ufast/common/`)
-(2026-08-01, formerly `my_utils/verification.py`).
+state at the end of the run and the logger records. Kept in its own folder because its nature differs from the shared utilities
+(`src/ufast/common/`).
 
 ## Files
 

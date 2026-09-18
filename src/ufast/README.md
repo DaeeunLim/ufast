@@ -94,10 +94,14 @@ mean/std with `python3 -m ufast.cosim.aggregate`.
 
 ```
 repo/
-├── pyproject.toml           # pip install -e . (console commands: ufast-run/analyze/aggregate)
+├── pyproject.toml           # pip install -e . (console commands: ufast-run/fromto/analyze/aggregate)
 ├── dataset/                 # rail (.rail), From-To, and SMT2020 datasets
 ├── results/                 # CLI experiment results (generated)
 ├── examples/                # custom strategy examples (.py)
+├── strategies/              # your own strategy files, found by bare name
+├── scripts/                 # benchmark / experiment scripts
+├── tests/                   # pytest suite
+├── docs/                    # CLI guide, output file spec, project structure
 └── src/
     └── ufast/               # ★ distributed package
         ├── main_ui.py       # GUI entry point (AMHS app logic + mode integration)
@@ -112,10 +116,6 @@ repo/
         ├── viz/             # Rerun visualization (layout, trajectory replay, GUI Replay recording)
         └── verification/    # result verification reports
 ```
-
-> 2026-08-05: reorganized into the standard src-layout — every subpackage now lives under
-> `src/ufast/`, and `dataset`/`results` moved to the repository root. The former `src/ufast`
-> (runner) became `ufast/cosim/`.
 
 ---
 
