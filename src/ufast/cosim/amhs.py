@@ -942,20 +942,25 @@ class AMHSExecutor:
             self._schedule_deadlock_check(t)
 
     def _find_deadlock_victim(self) -> Optional[str]:
-        """Find one wait-for cycle and return the name of the longest-waiting OHT in it."""
+        """Find one wait-for cycle and return the name of the longest-waiting OHT in it.
+
+        Which cycle is found first decides the victim, so the search must not depend
+        on set iteration order (str hashes change with PYTHONHASHSEED): start nodes
+        follow _blocked_since insertion order and edges are sorted by name.
+        """
         blocked = set(self._blocked_since)
         adj: Dict[str, List[str]] = {}
         for name, (target, _since) in self._blocked_since.items():
             occupants = self._section_vehicles.get(target, set())
             # if any occupant is moving (not blocked), it can resolve naturally — no edge
             if occupants and occupants <= blocked:
-                adj[name] = list(occupants)
+                adj[name] = sorted(occupants)
             else:
                 adj[name] = []
 
         WHITE, GRAY, BLACK = 0, 1, 2
-        color = {n: WHITE for n in blocked}
-        for start in blocked:
+        color = {n: WHITE for n in self._blocked_since}
+        for start in self._blocked_since:
             if color[start] != WHITE:
                 continue
             stack: List[Tuple[str, int]] = [(start, 0)]
