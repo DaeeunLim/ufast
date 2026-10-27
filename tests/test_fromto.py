@@ -168,3 +168,40 @@ class TestCustomStrategyFlags(unittest.TestCase):
                          {'assignment': 'custom_assignment_example.py',
                           'routing_cost': tmp_name})
         self.assertGreater(out['jobs_completed'], 0)
+
+
+_FROMTO_RESULT_SCRIPT = """
+import contextlib, io, json, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+from ufast.cosim import results as R
+from ufast.cosim.run_fromto import run_fromto
+with tempfile.TemporaryDirectory() as d:
+    R.DEFAULT_RESULTS_DIR = d
+    with contextlib.redirect_stdout(io.StringIO()):
+        out = run_fromto(sys.argv[2], sys.argv[3], num_oht=50,
+                         sim_duration_s=3600.0, seed=0, verbose=False)
+    res = json.load(open(out['result_path']))
+del res['meta']['run_id'], res['meta']['wall_time_s']
+print(json.dumps(res, sort_keys=True))
+"""
+
+
+class TestHashSeedIndependence(unittest.TestCase):
+    """The same seed must give the same result whatever PYTHONHASHSEED is
+    (OHT names are str, so set order over them changes between processes)."""
+
+    def test_fromto_result_identical_across_hash_seeds(self):
+        import json, subprocess
+        root = Path(__file__).resolve().parent.parent
+        args = [sys.executable, '-c', _FROMTO_RESULT_SCRIPT, str(root / 'src'),
+                str(root / 'dataset' / 'case1.rail'),
+                str(root / 'dataset' / 'case1_Fromto.dat')]
+        procs = [subprocess.Popen(args, env=dict(os.environ, PYTHONHASHSEED=str(seed)),
+                                  stdout=subprocess.PIPE, text=True)
+                 for seed in range(3)]
+        outs = [p.communicate()[0] for p in procs]
+        self.assertEqual([p.returncode for p in procs], [0, 0, 0])
+        results = [json.loads(o) for o in outs]
+        self.assertGreater(results[0]['transport']['lots_completed'], 0)
+        self.assertEqual(results[1], results[0])
+        self.assertEqual(results[2], results[0])

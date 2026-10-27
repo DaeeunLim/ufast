@@ -4,6 +4,8 @@ Verifies only the core logic of the AMHSExecutor queue model without the full
 stack (RouteManager + rail loading) — FIFO wake-up of waiters, wait-for cycle
 detection, forced entry.
 """
+import os
+import subprocess
 import sys
 from collections import defaultdict, deque
 from pathlib import Path
@@ -11,6 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ufast.cosim.amhs import AMHSExecutor  # noqa: E402
+
+TESTS_DIR = Path(__file__).resolve().parent
+SRC_DIR = TESTS_DIR.parent / "src"
 
 
 def _bare_executor(**attrs):
@@ -38,6 +43,29 @@ def _bare_executor(**attrs):
 class _FakeOHT:
     def __init__(self, name):
         self.name = name
+
+
+def _shared_target_deadlock():
+    """OHT_0000 waits for sec 2, occupied by eight blocked OHTs that all wait for
+    OHT_0000's sec 1 — eight overlapping 2-cycles. OHT_0000 has waited the
+    shortest, so the victim is whichever occupant the search reaches first."""
+    occupants = [f'OHT_{i:04d}' for i in range(1, 9)]
+    blocked_since = {'OHT_0000': (2, 100.0)}
+    for i, name in enumerate(reversed(occupants)):
+        blocked_since[name] = (1, float(i))
+    return _bare_executor(
+        _blocked_since=blocked_since,
+        _section_vehicles=defaultdict(
+            set, {1: {'OHT_0000'}, 2: set(occupants)}),
+    )
+
+
+_VICTIM_SCRIPT = """
+import sys
+sys.path[:0] = sys.argv[1:3]
+from test_queue_model import _shared_target_deadlock
+print(_shared_target_deadlock()._find_deadlock_victim())
+"""
 
 
 class TestDeadlockDetection:
@@ -73,6 +101,22 @@ class TestDeadlockDetection:
                 set, {2: {'B'}, 3: {'M'}}),
         )
         assert ex._find_deadlock_victim() is None
+
+    def test_victim_follows_block_order_then_name(self):
+        # search starts at the first vehicle blocked and takes occupants by name
+        assert _shared_target_deadlock()._find_deadlock_victim() == 'OHT_0001'
+
+    def test_victim_does_not_depend_on_hash_seed(self):
+        # str hashes (and so set order) change with PYTHONHASHSEED, which is
+        # fixed per process — compare fresh interpreters
+        victims = set()
+        for seed in range(5):
+            env = dict(os.environ, PYTHONHASHSEED=str(seed))
+            out = subprocess.run(
+                [sys.executable, '-c', _VICTIM_SCRIPT, str(SRC_DIR), str(TESTS_DIR)],
+                env=env, capture_output=True, text=True, check=True)
+            victims.add(out.stdout.strip())
+        assert victims == {'OHT_0001'}
 
 
 class TestWakeWaiters:
