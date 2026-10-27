@@ -598,6 +598,13 @@ class AMHSExecutor:
             merged_secs = empty_secs + loaded_secs[1:]
             merged_durs = empty_durs[:-1] + [empty_durs[-1] + loaded_durs[0]] + loaded_durs[1:]
             pickup_idx = len(empty_secs) - 1
+        elif empty_secs and loaded_secs:
+            # Section-level routes run between section endpoints, so the empty leg
+            # often ends in a section adjacent to the one the loaded leg starts in.
+            # Append the loaded leg as is; pickup = last section of the empty leg.
+            merged_secs = empty_secs + loaded_secs
+            merged_durs = empty_durs + loaded_durs
+            pickup_idx = len(empty_secs) - 1
         elif not empty_secs and loaded_secs:
             merged_secs = list(loaded_secs)
             merged_durs = list(loaded_durs)
@@ -607,7 +614,8 @@ class AMHSExecutor:
             merged_durs = list(empty_durs)
             pickup_idx = len(empty_secs) - 1
         else:
-            # both empty — immediate delivery
+            # both legs empty (OHT at the pickup and pickup == destination, or no
+            # route) — immediate delivery
             merged_secs = [oht.current_section_id]
             merged_durs = [0.0]
             pickup_idx = 0
@@ -615,7 +623,10 @@ class AMHSExecutor:
         job.section_path = merged_secs
         job.section_durations = merged_durs
         job.pickup_idx = pickup_idx
-        job.node_path = empty_nodes + (loaded_nodes[1:] if loaded_nodes else [])
+        if empty_nodes and loaded_nodes and empty_nodes[-1] == loaded_nodes[0]:
+            job.node_path = empty_nodes + loaded_nodes[1:]
+        else:
+            job.node_path = empty_nodes + loaded_nodes
         job.empty_path = empty_nodes
         job.loaded_path = loaded_nodes
         # Per-leg free-flow times — split merged_durs at pickup_idx.
